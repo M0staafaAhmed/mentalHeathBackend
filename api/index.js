@@ -364,6 +364,25 @@ app.post('/chat', authenticateToken, async (req, res) => {
     }
 });
 
+
+app.get('/chat/history', authenticateToken, (req, res) => {
+    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
+
+    const sql = "SELECT UserMessage, AiResponse, CreatedAt FROM chatMessages WHERE UserID = ? ORDER BY CreatedAt ASC";
+
+    db.execute(sql, [UserID], (err, results) => {
+        if (err) {
+            console.error("خطأ في جلب تاريخ الشات:", err.message);
+            return res.status(500).json({ error: "فشل في تحميل المحادثات القديمة" });
+        }
+
+        res.json({
+            success: true,
+            history: results // دي مصفوفة (Array) فيها كل الرسايل
+        });
+    });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 // ... نهاية الكود بتاعك
