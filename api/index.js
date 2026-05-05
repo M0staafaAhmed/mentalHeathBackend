@@ -42,7 +42,7 @@ const authenticateToken = (req, res, next) => {
 
     if (!token) return res.status(401).send("يجب تسجيل الدخول أولاً");
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    jwt.verify(token, "mySecretKey", (err, user) => {
         if (err) return res.status(403).send("التوكن غير صالح أو انتهى");
         req.user = user;
         next();
