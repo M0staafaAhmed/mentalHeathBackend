@@ -42,7 +42,7 @@ const authenticateToken = (req, res, next) => {
 
     if (!token) return res.status(401).send("يجب تسجيل الدخول أولاً");
 
-    jwt.verify(token, "mySecretKey", (err, user) => {
+    jwt.verify(token, 'secret_key', (err, user) => {
         if (err) return res.status(403).send("التوكن غير صالح أو انتهى");
         req.user = user;
         next();
@@ -156,7 +156,7 @@ app.post('/login', (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(401).send("كلمة السر خطأ");
 
-        const token = jwt.sign({ id: user.UserID }, 'secret_key', { expiresIn: '1h' });
+        const token = jwt.sign({ id: user.UserID }, 'secret_key')
 
         res.json({
             message: "تم تسجيل الدخول بنجاح",
