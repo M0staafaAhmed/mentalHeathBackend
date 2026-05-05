@@ -4,16 +4,20 @@ const mysql = require('mysql2');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const Groq = require('groq-sdk');
 
 const app = express();
 app.use(express.json());
+
+// إعداد Groq
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // --- إعدادات الاتصال بـ Aiven ---
 const db = mysql.createPool({
     host: 'safe-space-saffe-space.j.aivencloud.com',
     port: 10399,
     user: 'avnadmin',
-    password: process.env.DB_PASSWORD, // استخدم الباسورد الخاص بك هنا
+    password: process.env.DB_PASSWORD,
     database: 'defaultdb',
     ssl: {
         rejectUnauthorized: false
@@ -34,38 +38,32 @@ db.getConnection((err, connection) => {
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Authorization: Bearer TOKEN
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).send("يجب تسجيل الدخول أولاً");
 
-    jwt.verify(token, 'secret_key', (err, user) => {
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
         if (err) return res.status(403).send("التوكن غير صالح أو انتهى");
-        req.user = user; // هنا بنخزن بيانات اليوزر اللي جاية من التوكن (الـ id)
+        req.user = user;
         next();
     });
 };
 
 // --- إعداد مرسل الإيميلات (OTP) ---
-// ملاحظة: لعمل هذا الجزء بشكل فعلي، يجب استخدام إيميل حقيقي وباسورد تطبيقات (App Password)
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
-    secure: true, // true لـ port 465، false لـ ports تانية
+    secure: true,
     auth: {
         user: 'mental.health.auth@gmail.com',
-        pass: process.env.EMAIL_PASS // الـ 16 حرف بتوع الـ App Password
+        pass: process.env.EMAIL_PASS
     }
 });
 
 // --- 1. تسجيل حساب جديد (Register) ---
 app.post('/register', async (req, res) => {
-    const {
-        FullName, Email,
-        password,
-        Phone, Gender, DateOfBirth
-    } = req.body;
+    const { FullName, Email, password, Phone, Gender, DateOfBirth } = req.body;
 
-    // B. التحققات (Regex)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(Email)) return res.status(400).send("برجاء إدخال بريد إلكتروني صحيح");
 
@@ -85,9 +83,8 @@ app.post('/register', async (req, res) => {
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // كود عشوائي
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // ملاحظة: تأكد من وجود أعمدة verification_code و is_verified في جدولك
         const sql = `INSERT INTO users (FullName, Email, password, Phone, Gender, DateOfBirth, verification_code, is_verified) 
                      VALUES (?, ?, ?, ?, ?, ?, ?, 0)`;
 
@@ -97,7 +94,6 @@ app.post('/register', async (req, res) => {
                 return res.status(500).send(err.message);
             }
 
-            // تجهيز رسالة الإيميل
             const mailOptions = {
                 from: '"Mental Health Support" <mental.health.auth@gmail.com>',
                 to: Email,
@@ -106,11 +102,9 @@ app.post('/register', async (req, res) => {
                 html: `<b>أهلاً بك،</b><br>كود التفعيل الخاص بك هو: <h2 style="color:blue;">${otpCode}</h2>`
             };
 
-            // تنفيذ الإرسال فعلياً
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
                     console.error("❌ فشل إرسال الإيميل:", error.message);
-                    // بنبعت رد للمستخدم حتى لو الإيميل فشل عشان نعرفه إن الحساب اتعمل بس الكود مبعتش
                     return res.status(201).json({
                         message: "تم إنشاء الحساب، ولكن فشل إرسال كود التفعيل.",
                         error: error.message
@@ -120,7 +114,7 @@ app.post('/register', async (req, res) => {
                 console.log("✅ تم إرسال الإيميل بنجاح:", info.response);
                 res.status(201).json({
                     message: "تم إنشاء الحساب بنجاح. برجاء فحص إيميلك لتفعيل الحساب.",
-                    debug_otp: otpCode // ده للتجربة فقط في البداية
+                    debug_otp: otpCode
                 });
             });
         });
@@ -157,7 +151,6 @@ app.post('/login', (req, res) => {
 
         const user = results[0];
 
-        // التأكد من التفعيل
         if (user.is_verified === 0) return res.status(403).send("برجاء تفعيل الحساب أولاً");
 
         const isMatch = await bcrypt.compare(password, user.password);
@@ -173,10 +166,8 @@ app.post('/login', (req, res) => {
     });
 });
 
-
-// --- عرض قائمة الأطباء (Get All Doctors) ---
+// --- عرض قائمة الأطباء ---
 app.get('/doctors', (req, res) => {
-    // استعلام لجلب جميع الأطباء وترتيبهم حسب الأحدث
     const sql = "SELECT * FROM doctors ORDER BY CreatedAt DESC";
 
     db.execute(sql, (err, results) => {
@@ -185,7 +176,6 @@ app.get('/doctors', (req, res) => {
             return res.status(500).send("خطأ في السيرفر عند جلب البيانات");
         }
 
-        // إرسال البيانات في شكل JSON
         res.status(200).json({
             success: true,
             count: results.length,
@@ -194,7 +184,7 @@ app.get('/doctors', (req, res) => {
     });
 });
 
-// --- عرض طبيب واحد محدد بواسطة الـ ID ---
+// --- عرض طبيب واحد ---
 app.get('/doctors/:id', (req, res) => {
     const doctorId = req.params.id;
     const sql = "SELECT * FROM doctors WHERE DoctorID = ?";
@@ -207,51 +197,171 @@ app.get('/doctors/:id', (req, res) => {
     });
 });
 
-
-// --- إضافة نتيجة اختبار جديد (Add Test Result) ---
+// --- إضافة نتيجة اختبار ---
 app.post('/test-results', authenticateToken, (req, res) => {
     const { TestTypeID, ResultValue } = req.body;
-    const UserID = req.user.id; // جبناه من التوكن آلياً
+    const UserID = req.user.id;
 
     const sql = "INSERT INTO testresults (UserID, TestTypeID, ResultValue) VALUES (?, ?, ?)";
-    
+
     db.execute(sql, [UserID, TestTypeID, ResultValue], (err, result) => {
         if (err) return res.status(500).send(err.message);
         res.status(201).json({ message: "تم إضافة نتيجة الاختبار بنجاح" });
     });
 });
 
-// --- عرض نتائج الاختبارات الخاصة بالمستخدم مع اسم الاختبار (Get My Test Results with Names) ---
+// --- عرض نتائج الاختبارات ---
 app.get('/test-results', authenticateToken, (req, res) => {
-    const UserID = req.user.id; // جبناه من التوكن
+    const UserID = req.user.id;
 
     // استخدمنا JOIN لربط الجدولين عن طريق TestTypeID
     const sql = `
-        SELECT 
-            tr.TestResultID, 
-            tr.ResultValue, 
-            tr.ResultDate, 
-            tt.TestName, 
-            tt.Unit, 
-            tt.NormalRange
-        FROM testresults tr
-        JOIN testtypes tt ON tr.TestTypeID = tt.TestTypeID
-        WHERE tr.UserID = ? 
-        ORDER BY tr.ResultDate DESC
-    `;
+    SELECT 
+        tr.TestResultID, 
+        tr.ResultValue, 
+        tr.ResultDate, 
+        tt.TestName
+    FROM testresults tr
+    JOIN testtypes tt ON tr.TestTypeID = tt.TestTypeID
+    WHERE tr.UserID = ? 
+    ORDER BY tr.ResultDate DESC
+`;
 
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
             console.error("❌ خطأ في الاستعلام:", err.message);
             return res.status(500).send("خطأ في جلب البيانات من قاعدة البيانات");
         }
-        
+
         res.status(200).json({
             success: true,
             count: results.length,
             data: results
         });
     });
+});
+
+// --- الشات مع Groq AI ---
+app.post('/chat', authenticateToken, async (req, res) => {
+    try {
+        const { message } = req.body;
+        const UserID = req.user.id;
+
+        if (!message) return res.status(400).send("الرسالة فارغة");
+
+        const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
+
+                                Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
+
+                                You support users experiencing symptoms related to:
+                                - Depression
+                                - Anxiety
+                                - OCD (Obsessive Compulsive Disorder)
+                                - ADHD
+                                - PTSD
+
+                                ---
+
+                                CORE BEHAVIOR:
+
+                                1. Emotional Support:
+                                - Always respond with empathy, warmth, and non-judgment.
+                                - Validate the user's feelings without labeling them as a medical condition.
+
+                                2. Smart Guidance (VERY IMPORTANT):
+                                - Based on the user's message, gently suggest the most relevant self-assessment test in the app.
+                                - Do NOT force or diagnose.
+                                - Use soft language like:
+                                - "Based on what you're describing..."
+                                - "You might benefit from trying..."
+                                - "It could be helpful to take the..."
+
+                                Examples:
+                                - If user expresses sadness, hopelessness → suggest Depression test
+                                - If user expresses excessive worry, panic → suggest Anxiety test
+                                - If user mentions distraction, lack of focus → suggest ADHD test
+                                - If user mentions intrusive thoughts or repetitive behaviors → suggest OCD test
+                                - If user mentions trauma or flashbacks → suggest PTSD test
+
+                                3. No Diagnosis Rule:
+                                - Never say:
+                                - "You have depression"
+                                - "You are diagnosed with..."
+                                - Any percentages or scores
+
+                                Instead say:
+                                - "You may be experiencing symptoms similar to..."
+                                - "It could be helpful to explore..."
+
+                                ---
+
+                                4. Output Style:
+                                - Use simple Arabic (Egyptian dialect preferred)
+                                - Keep responses short, calming, and supportive
+                                - Avoid medical jargon
+
+                                ---
+
+                                5. App Integration Goal:
+                                Your main goal is to guide users toward the app's self-assessment feature.
+
+                                When appropriate, suggest:
+                                - "You can take the Depression self-assessment test in the app to better understand your feelings."
+                                - "There is an Anxiety check in the app that might help you reflect on what you're feeling."
+
+                                ---
+
+                                6. Crisis Handling:
+                                If user expresses self-harm or severe distress:
+                                - Respond with immediate empathy
+                                - Encourage reaching out to a trusted person or professional help
+                                - Do NOT leave user alone with instructions or technical suggestions
+
+                                ---
+
+                                7. Final Objective:
+                                Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.
+
+                                user message: ${message}`;
+
+        // إرسال الطلب لـ Groq
+        const result = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: message }
+            ],
+            max_tokens: 1024
+        });
+
+        const aiText = result.choices[0].message.content;
+
+        // حفظ المحادثة في الداتابيز
+        const sql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
+        db.execute(sql, [UserID, message, aiText], (err) => {
+            if (err) console.error("خطأ في حفظ الرسالة:", err.message);
+
+            res.json({
+                success: true,
+                reply: aiText
+            });
+        });
+
+    } catch (error) {
+        console.error("Groq Error:", error);
+
+        if (error.status === 429) {
+            return res.status(503).json({
+                success: false,
+                reply: "الخدمة مشغولة حالياً، برجاء المحاولة بعد قليل 🙏"
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            reply: "حدث خطأ في التواصل مع الذكاء الاصطناعي"
+        });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
