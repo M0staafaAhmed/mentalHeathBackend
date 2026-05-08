@@ -99,7 +99,45 @@ app.post('/register', async (req, res) => {
                 to: Email,
                 subject: 'كود تفعيل حسابك - OTP',
                 text: `أهلاً بك، كود التفعيل الخاص بك هو: ${otpCode}`,
-                html: `<b>أهلاً بك،</b><br>كود التفعيل الخاص بك هو: <h2 style="color:blue;">${otpCode}</h2>`
+                html: `
+                <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e7ff; border-radius: 16px; overflow: hidden; background-color: #ffffff;">
+                    <!-- Header -->
+                    <div style="background-color: #f0fdf4; padding: 30px; text-align: center;">
+                        <div style="font-size: 24px; font-weight: bold; color: #166534; margin-bottom: 10px;">
+                            Mental Health Support
+                        </div>
+                        <div style="width: 50px; height: 4px; background-color: #22c55e; margin: 0 auto; border-radius: 2px;"></div>
+                    </div>
+
+                    <!-- Body -->
+                    <div style="padding: 40px 30px; text-align: center;">
+                        <h2 style="color: #1e293b; margin-bottom: 20px;">مرحباً بك!</h2>
+                        <p style="color: #64748b; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">
+                            لقد بدأت خطوة رائعة للاهتمام بصحتك النفسية. لتأكيد حسابك، يرجى استخدام رمز التحقق (OTP) التالي:
+                        </p>
+                        
+                        <div style="background-color: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; display: inline-block; margin-bottom: 30px;">
+                            <span style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #16a34a; font-family: monospace;">
+                                ${otpCode}
+                            </span>
+                        </div>
+
+                        <p style="color: #94a3b8; font-size: 14px;">
+                            هذا الكود صالح لمدة 10 دقائق فقط. إذا لم تكن أنت من طلب هذا الرمز، يمكنك تجاهل هذا البريد.
+                        </p>
+                    </div>
+
+                    <!-- Footer -->
+                    <div style="background-color: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #f1f5f9;">
+                        <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+                            مع كل التمنيات لك بالهدوء والراحة النفسية
+                        </p>
+                        <p style="color: #94a3b8; font-size: 12px; margin-top: 5px;">
+                            © ${new Date().getFullYear()} Mental Health Support Team
+                        </p>
+                    </div>
+                </div>
+                `
             };
 
             transporter.sendMail(mailOptions, (error, info) => {
