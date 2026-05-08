@@ -116,7 +116,7 @@ app.post('/register', async (req, res) => {
                                 نحن هنا لدعمك. لضمان أمان حسابك والبدء في استخدام المنصة، يرجى إدخال رمز التحقق التالي:
                             </p>
                             
-                            <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 16px; padding: 25px; display: inline-block; min-width: 200px; margin-bottom: 35px;">
+                            <div style="background-color: #f8fafc; border: 1px doted #cbd5e1; border-radius: 16px; padding: 25px; display: inline-block; min-width: 200px; margin-bottom: 35px;">
                                 <span style="font-size: 40px; font-weight: 900; letter-spacing: 10px; color: #2563eb; font-family: 'Courier New', Courier, monospace;">
                                     ${otpCode}
                                 </span>
