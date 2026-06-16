@@ -494,45 +494,59 @@ app.post('/verify-reset-code', (req, res) => {
     });
 });
 
-// --- 6. الخطوة الثالثة والأخيرة: تغيير الباسورد وحذف السجل ---
-app.post('/reset-password', async (req, res) => {
+// --- 6. الخطوة الثالثة والأخيرة: تغيير الباسورد وحذف السجل (تعديل لـ PUT) ---
+app.put('/reset-password', async (req, res) => {
     const { Email, password } = req.body;
 
     if (!Email || !password) return res.status(400).send("البيانات المطلوبة غير مكتملة");
 
+    // التحقق من قوة الباسورد الجديد
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
-    if (!passwordRegex.test(password)) return res.status(400).send("كلمة السر ضعيفة");
+    if (!passwordRegex.test(password)) return res.status(400).send("كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)");
 
-    // التأكد من أن الإيميل حالته 'VERIFIED' في الجدول المنفصل وحساب الوقت لمزيد من الأمان
-    const sqlCheck = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
-    db.execute(sqlCheck, [Email], async (err, results) => {
-        if (err) return res.status(500).send(err.message);
+    // 🔍 التعديل الجديد: التشييك أولاً في جدول المستخدمين الرئيسي للتأكد من وجود الإيميل
+    const sqlCheckUser = "SELECT * FROM users WHERE Email = ?";
+    db.execute(sqlCheckUser, [Email], (userErr, userResults) => {
+        if (userErr) return res.status(500).send(userErr.message);
         
-        if (results.length === 0 || results[0].minutes_passed > 10) {
-            db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
-            return res.status(403).send("طلب غير مصرح به أو انتهت الـ 10 دقائق، يرجى إعادة المحاولة من البداية");
+        // لو الإيميل مش موجود في الداتابيز أصلاً
+        if (userResults.length === 0) {
+            return res.status(404).send("هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً");
         }
 
-        try {
-            // تشفير الباسورد الجديد
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            // تحديث جدول المستخدمين الرئيسي بالباسورد الجديد
-            const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
-            db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
-                if (upErr) return res.status(500).send(upErr.message);
-
-                // 🌟 الحركة الأهم: حذف اليوزر تماماً من جدول الـ password_resets بعد النجاح عشان ننظف الداتابيز تماماً
+        // لو الحساب موجود، نبدأ نشيك على حالة التفعيل والوقت في جدول password_resets
+        const sqlCheckReset = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
+        db.execute(sqlCheckReset, [Email], async (resetErr, resetResults) => {
+            if (resetErr) return res.status(500).send(resetErr.message);
+            
+            // لو الإيميل موجود بس مأكدش الكود في الخطوة التانية، أو الوقت (10 دقائق) انتهى
+            if (resetResults.length === 0 || resetResults[0].minutes_passed > 10) {
+                // تنظيف الجدول وحذف السجل المنتهي
                 db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
+                return res.status(403).send("طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى");
+            }
 
-                res.status(200).json({
-                    success: true,
-                    message: "تم تغيير كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن."
+            try {
+                // تشفير الباسورد الجديد
+                const hashedPassword = await bcrypt.hash(password, 10);
+
+                // تحديث الباسورد في جدول الـ users
+                const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
+                db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
+                    if (upErr) return res.status(500).send(upErr.message);
+
+                    // حذف السجل المؤقت من جدول الـ password_resets بعد النجاح
+                    db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
+
+                    res.status(200).json({
+                        success: true,
+                        message: "تم تغيير كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن."
+                    });
                 });
-            });
-        } catch (error) {
-            res.status(500).send("خطأ في السيرفر");
-        }
+            } catch (error) {
+                res.status(500).send("خطأ في السيرفر أثناء تشفير كلمة المرور");
+            }
+        });
     });
 });
 
