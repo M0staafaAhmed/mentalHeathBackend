@@ -404,6 +404,138 @@ app.post('/chat', authenticateToken, async (req, res) => {
     }
 });
 
+// --- 4. طلب كود إعادة تعيين كلمة المرور (Forgot Password) ---
+app.post('/forgot-password', (req, res) => {
+    const { Email } = req.body;
+
+    if (!Email) return res.status(400).send("برجاء إدخال البريد الإلكتروني");
+
+    // 1. التأكد أولاً أن الإيميل مسجل في الحسابات الفعالة
+    const sqlCheck = "SELECT * FROM users WHERE Email = ? AND is_verified = 1";
+    db.execute(sqlCheck, [Email], (err, results) => {
+        if (err) return res.status(500).send(err.message);
+        if (results.length === 0) return res.status(404).send("هذا البريد الإلكتروني غير مسجل أو غير مفعل");
+
+        // 2. توليد كود الـ OTP
+        const resetOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // 3. حفظ أو تحديث الكود في الجدول المنفصل (password_resets)
+        // استخدمنا REPLACE INTO عشان لو طلب كود تاني يمسح القديم ويحدثه فوراً بالوقت الجديد
+        const sqlInsertReset = "REPLACE INTO password_resets (Email, token_code) VALUES (?, ?)";
+        db.execute(sqlInsertReset, [Email, resetOtpCode], (upErr) => {
+            if (upErr) return res.status(500).send(upErr.message);
+
+            // 4. إرسال الإيميل
+            const mailOptions = {
+                from: '"Mental Health Support" <mental.health.auth@gmail.com>',
+                to: Email,
+                subject: 'إعادة تعيين كلمة المرور - OTP',
+                html: `
+                    <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; background-color: #ffffff;">
+                        <div style="background-color: #fef2f2; padding: 35px 20px; text-align: center;">
+                            <h1 style="color: #dc2626; margin: 0;">إعادة تعيين كلمة المرور</h1>
+                        </div>
+                        <div style="padding: 45px 35px; text-align: center;">
+                            <p style="color: #475569; font-size: 16px;">كود التحقق الخاص بك (صالح لمدة 10 دقائق):</p>
+                            <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 25px; display: inline-block; min-width: 200px; margin-bottom: 20px;">
+                                <span style="font-size: 40px; font-weight: bold; color: #dc2626; letter-spacing: 10px; font-family: monospace;">${resetOtpCode}</span>
+                            </div>
+                        </div>
+                    </div>`
+            };
+
+            transporter.sendMail(mailOptions, (mailErr) => {
+                if (mailErr) return res.status(500).send("فشل في إرسال الإيميل");
+                res.status(200).json({ 
+                    success: true, 
+                    message: "تم إرسال كود إعادة التعيين بنجاح.",
+                    debug_otp: resetOtpCode
+                });
+            });
+        });
+    });
+});
+
+// --- 5. الخطوة الثانية: التأكد من الكود والوقت (Verify Reset Code) ---
+app.post('/verify-reset-code', (req, res) => {
+    const { Email, code } = req.body;
+
+    if (!Email || !code) return res.status(400).send("برجاء إدخال الإيميل والكود");
+
+    // جلب بيانات الكود من الجدول المنفصل
+    const sql = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ?";
+    db.execute(sql, [Email], (err, results) => {
+        if (err) return res.status(500).send(err.message);
+        if (results.length === 0) return res.status(400).send("لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته");
+
+        const record = results[0];
+
+        // 1. التشييك على الوقت (لو عدى أكتر من 10 دقائق)
+        if (record.minutes_passed > 10) {
+            // نحذفه من جدول الريسيت عشان ننظف أول بأول
+            db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
+            return res.status(400).send("انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد");
+        }
+
+        // 2. التشييك على صحة الكود
+        if (record.token_code !== code) {
+            return res.status(400).send("الكود غير صحيح");
+        }
+
+        // 3. الكود صح وضمن الـ 10 دقائق ➔ نقوم بتحديث الكود لكلمة 'VERIFIED' كإثبات للخطوة الثالثة
+        db.execute("UPDATE password_resets SET token_code = 'VERIFIED' WHERE Email = ?", [Email], (verErr) => {
+            if (verErr) return res.status(500).send(verErr.message);
+
+            res.status(200).json({
+                success: true,
+                message: "تم التحقق من الكود بنجاح. يمكنك الآن تعيين الباسورد الجديد."
+            });
+        });
+    });
+});
+
+// --- 6. الخطوة الثالثة والأخيرة: تغيير الباسورد وحذف السجل ---
+app.post('/reset-password', async (req, res) => {
+    const { Email, password } = req.body;
+
+    if (!Email || !password) return res.status(400).send("البيانات المطلوبة غير مكتملة");
+
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
+    if (!passwordRegex.test(password)) return res.status(400).send("كلمة السر ضعيفة");
+
+    // التأكد من أن الإيميل حالته 'VERIFIED' في الجدول المنفصل وحساب الوقت لمزيد من الأمان
+    const sqlCheck = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
+    db.execute(sqlCheck, [Email], async (err, results) => {
+        if (err) return res.status(500).send(err.message);
+        
+        if (results.length === 0 || results[0].minutes_passed > 10) {
+            db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
+            return res.status(403).send("طلب غير مصرح به أو انتهت الـ 10 دقائق، يرجى إعادة المحاولة من البداية");
+        }
+
+        try {
+            // تشفير الباسورد الجديد
+            const hashedPassword = await bcrypt.hash(password, 10);
+
+            // تحديث جدول المستخدمين الرئيسي بالباسورد الجديد
+            const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
+            db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
+                if (upErr) return res.status(500).send(upErr.message);
+
+                // 🌟 الحركة الأهم: حذف اليوزر تماماً من جدول الـ password_resets بعد النجاح عشان ننظف الداتابيز تماماً
+                db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
+
+                res.status(200).json({
+                    success: true,
+                    message: "تم تغيير كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن."
+                });
+            });
+        } catch (error) {
+            res.status(500).send("خطأ في السيرفر");
+        }
+    });
+});
+
 
 app.get('/chat/history', authenticateToken, (req, res) => {
     const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
