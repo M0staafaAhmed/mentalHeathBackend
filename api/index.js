@@ -569,6 +569,59 @@ app.get('/chat/history', authenticateToken, (req, res) => {
     });
 });
 
+
+// 1. جلب قائمة كل الاختبارات المتاحة
+app.get('/tests', (req, res) => {
+    // جلب الـ ID، الاسم، الوصف، النورمال رينج، وعدد الأسئلة
+    const sql = "SELECT TestTypeID, TestName, Description, NormalRange, TotalQuestions FROM testtypes";
+    
+    db.execute(sql, (err, results) => {
+        if (err) {
+            console.error("❌ خطأ أثناء جلب الاختبارات:", err.message);
+            return res.status(500).json({ success: false, error: "Internal Server Error" });
+        }
+        
+        // إرجاع النتيجة للفرونت-إند
+        res.status(200).json({
+            success: true,
+            count: results.length,
+            tests: results
+        });
+    });
+});
+
+// 2. جلب الأسئلة الخاصة باختبار معين عن طريق الـ ID
+app.get('/tests/:testId', (req, res) => {
+    const testId = req.params.testId;
+
+    // تشيك بسيط للتأكد إن الـ ID مبعوث وهو عبارة عن رقم
+    if (!testId || isNaN(testId)) {
+        return res.status(400).json({ success: false, error: "Valid Test ID is required" });
+    }
+
+    const sql = "SELECT QuestionID, QuestionText FROM questions WHERE TestTypeID = ? ORDER BY QuestionID ASC";
+    
+    db.execute(sql, [testId], (err, results) => {
+        if (err) {
+            console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, err.message);
+            return res.status(500).json({ success: false, error: "Internal Server Error" });
+        }
+
+        // لو اليوزر بعت ID مش موجود في الداتابيز ومطلعش أسئلة
+        if (results.length === 0) {
+            return res.status(404).json({ success: false, error: "No questions found for this Test ID" });
+        }
+
+        // إرجاع الأسئلة الصافية
+        res.status(200).json({
+            success: true,
+            testId: parseInt(testId),
+            total_questions: results.length,
+            questions: results
+        });
+    });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 // ... نهاية الكود بتاعك
