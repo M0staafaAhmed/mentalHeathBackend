@@ -590,34 +590,58 @@ app.get('/tests', (req, res) => {
     });
 });
 
-// 2. جلب الأسئلة الخاصة باختبار معين عن طريق الـ ID
+// 2. جلب معلومات اختبار معين والأسئلة الخاصة به عن طريق الـ ID
 app.get('/tests/:testId', (req, res) => {
     const testId = req.params.testId;
 
-    // تشيك بسيط للتأكد إن الـ ID مبعوث وهو عبارة عن رقم
+    // التأكد إن الـ ID مبعوث وهو عبارة عن رقم
     if (!testId || isNaN(testId)) {
         return res.status(400).json({ success: false, error: "Valid Test ID is required" });
     }
 
-    const sql = "SELECT QuestionID, QuestionText FROM questions WHERE TestTypeID = ? ORDER BY QuestionID ASC";
+    // 1️⃣ الاستعلام الأول: جلب بيانات الاختبار نفسه
+    const testSql = "SELECT TestTypeID, TestName, Description, NormalRange, TotalQuestions FROM testtypes WHERE TestTypeID = ?";
     
-    db.execute(sql, [testId], (err, results) => {
-        if (err) {
-            console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, err.message);
+    db.execute(testSql, [testId], (testErr, testResults) => {
+        if (testErr) {
+            console.error(`❌ خطأ أثناء جلب بيانات الاختبار رقم ${testId}:`, testErr.message);
             return res.status(500).json({ success: false, error: "Internal Server Error" });
         }
 
-        // لو اليوزر بعت ID مش موجود في الداتابيز ومطلعش أسئلة
-        if (results.length === 0) {
-            return res.status(404).json({ success: false, error: "No questions found for this Test ID" });
+        // لو الـ ID مش موجود في جدول الاختبارات اصلاً
+        if (testResults.length === 0) {
+            return res.status(404).json({ success: false, error: "Test not found" });
         }
 
-        // إرجاع الأسئلة الصافية
-        res.status(200).json({
-            success: true,
-            testId: parseInt(testId),
-            total_questions: results.length,
-            questions: results
+        // حفظ بيانات الاختبار في أوبجكت لوحده
+        const testInfo = testResults[0];
+
+        // 2️⃣ الاستعلام الثاني: جلب الأسئلة المربوطة بالاختبار ده
+        const questionsSql = "SELECT QuestionID, QuestionText FROM questions WHERE TestTypeID = ? ORDER BY QuestionID ASC";
+        
+        db.execute(questionsSql, [testId], (qErr, qResults) => {
+            if (qErr) {
+                console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, qErr.message);
+                return res.status(500).json({ success: false, error: "Internal Server Error" });
+            }
+
+            // 🚀 إرسال الـ Response بالتقسيمة المطلوبة
+            res.status(200).json({
+                success: true,
+                // أوبجكت يحتوي على معلومات الاختبار بالكامل
+                test_details: {
+                    id: testInfo.TestTypeID,
+                    name: testInfo.TestName,
+                    description: testInfo.Description,
+                    normal_range: testInfo.NormalRange,
+                    total_questions_expected: testInfo.TotalQuestions
+                },
+                // أوبجكت (أو مصفوفة أوبجكتس) للأسئلة فقط
+                questions_data: {
+                    total_questions_found: qResults.length,
+                    questions: qResults
+                }
+            });
         });
     });
 });
