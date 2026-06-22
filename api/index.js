@@ -5,6 +5,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const Groq = require('groq-sdk');
+const cors = require('cors');
+
+app.use(cors({
+    origin: '*', // السماح لأي دومين بالوصول للـ API
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], // السماح بالطرق دي
+    allowedHeaders: ['Content-Type', 'Authorization'] // السماح بالرؤوس دي
+}));
 
 const app = express();
 app.use(express.json());
