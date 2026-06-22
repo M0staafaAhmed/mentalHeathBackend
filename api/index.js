@@ -7,14 +7,14 @@ const nodemailer = require('nodemailer');
 const Groq = require('groq-sdk');
 const cors = require('cors');
 
+
+const app = express();
+app.use(express.json());
 app.use(cors({
     origin: '*', // السماح لأي دومين بالوصول للـ API
     methods: ['GET', 'POST', 'PUT', 'DELETE'], // السماح بالطرق دي
     allowedHeaders: ['Content-Type', 'Authorization'] // السماح بالرؤوس دي
 }));
-
-const app = express();
-app.use(express.json());
 
 // إعداد Groq
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
