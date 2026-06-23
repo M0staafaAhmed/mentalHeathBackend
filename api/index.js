@@ -84,9 +84,9 @@ app.post('/register', async (req, res) => {
     }
 
     // 3. التحقق من قوة كلمة السر
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
+    const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
     if (!passwordRegex.test(password)) {
-        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)" });
+        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم, رمز)" });
     }
 
     // 4. التحقق من الجنس
