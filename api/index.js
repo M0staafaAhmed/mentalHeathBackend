@@ -71,21 +71,34 @@ const transporter = nodemailer.createTransport({
 app.post('/register', async (req, res) => {
     const { FullName, Email, password, Phone, Gender, DateOfBirth } = req.body;
 
+    // 1. التحقق من صحة الإيميل
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(Email)) return res.status(400).send("برجاء إدخال بريد إلكتروني صحيح");
+    if (!emailRegex.test(Email)) {
+        return res.status(400).json({ message: "برجاء إدخال بريد إلكتروني صحيح" });
+    }
 
+    // 2. التحقق من رقم التليفون
     const phoneRegex = /^01[0125][0-9]{8}$/;
-    if (!phoneRegex.test(Phone)) return res.status(400).send("رقم التليفون غير صحيح (11 رقم مصري)");
+    if (!phoneRegex.test(Phone)) {
+        return res.status(400).json({ message: "رقم التليفون غير صحيح (11 رقم مصري)" });
+    }
 
+    // 3. التحقق من قوة كلمة السر
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
-    if (!passwordRegex.test(password)) return res.status(400).send("كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)");
+    if (!passwordRegex.test(password)) {
+        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)" });
+    }
 
+    // 4. التحقق من الجنس
     const validGenders = ['male', 'female'];
-    if (!validGenders.includes(Gender?.toLowerCase())) return res.status(400).send("يجب اختيار male أو female");
+    if (!validGenders.includes(Gender?.toLowerCase())) {
+        return res.status(400).json({ message: "يجب اختيار male أو female" });
+    }
 
+    // 5. التحقق من تاريخ الميلاد
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(DateOfBirth) || isNaN(new Date(DateOfBirth).getTime())) {
-        return res.status(400).send("تنسيق تاريخ الميلاد غير صحيح (YYYY-MM-DD)");
+        return res.status(400).json({ message: "تنسيق تاريخ الميلاد غير صحيح (YYYY-MM-DD)" });
     }
 
     try {
@@ -97,8 +110,11 @@ app.post('/register', async (req, res) => {
 
         db.execute(sql, [FullName, Email, hashedPassword, Phone, Gender.toLowerCase(), DateOfBirth, otpCode], (err, result) => {
             if (err) {
-                if (err.code === 'ER_DUP_ENTRY') return res.status(400).send("الايميل موجود بالفعل");
-                return res.status(500).send(err.message);
+                // إرجاع خطأ تكرار الحساب بتنسيق JSON
+                if (err.code === 'ER_DUP_ENTRY') {
+                    return res.status(400).json({ message: "الايميل موجود بالفعل" });
+                }
+                return res.status(500).json({ message: err.message });
             }
 
             const mailOptions = {
@@ -108,7 +124,6 @@ app.post('/register', async (req, res) => {
                 text: `أهلاً بك، كود التفعيل الخاص بك هو: ${otpCode}`,
                 html: `
                     <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-                        <!-- Header -->
                         <div style="background-color: #eff6ff; padding: 35px 20px; text-align: center;">
                             <div style="font-size: 26px; font-weight: bold; color: #1e40af; margin-bottom: 10px; letter-spacing: 0.5px;">
                                 Mental Health Support
@@ -116,7 +131,6 @@ app.post('/register', async (req, res) => {
                             <div style="width: 60px; height: 3px; background-color: #3b82f6; margin: 0 auto; border-radius: 10px;"></div>
                         </div>
 
-                        <!-- Body -->
                         <div style="padding: 45px 35px; text-align: center;">
                             <h2 style="color: #0f172a; font-size: 22px; margin-bottom: 20px;">مرحباً بك في رحلتك الجديدة</h2>
                             <p style="color: #475569; font-size: 16px; line-height: 1.8; margin-bottom: 35px;">
@@ -134,19 +148,18 @@ app.post('/register', async (req, res) => {
                             </p>
                         </div>
 
-                        <!-- Footer -->
                         <div style="background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #f1f5f9;">
                             <p style="color: #64748b; font-size: 13px; margin: 0;">
                                 خطوة صغيرة اليوم، تعني الكثير لغدٍ أفضل.
                             </p>
-                            <div style="margin-top: 15px; border-top: 1px solid #e2e8f0; pt: 15px;">
+                            <div style="margin-top: 15px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
                                 <p style="color: #94a3b8; font-size: 11px; margin-top: 10px;">
                                     © ${new Date().getFullYear()} Mental Health Support Team
                                 </p>
                             </div>
                         </div>
                     </div>
-                    `
+                `
             };
 
             transporter.sendMail(mailOptions, (error, info) => {
@@ -166,7 +179,7 @@ app.post('/register', async (req, res) => {
             });
         });
     } catch (error) {
-        res.status(500).send("خطأ في السيرفر");
+        res.status(500).json({ message: "خطأ في السيرفر" });
     }
 });
 
@@ -174,15 +187,32 @@ app.post('/register', async (req, res) => {
 app.post('/verify', (req, res) => {
     const { Email, code } = req.body;
 
+    // التحقق من وجود المدخلات الأساسية أولاً كحماية إضافية
+    if (!Email || !code) {
+        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني وكود التفعيل" });
+    }
+
     const sql = "SELECT * FROM users WHERE Email = ? AND verification_code = ?";
     db.execute(sql, [Email, code], (err, results) => {
-        if (err) return res.status(500).send(err.message);
-        if (results.length === 0) return res.status(400).send("الكود غير صحيح");
+        if (err) {
+            return res.status(500).json({ message: err.message });
+        }
+        
+        // إذا لم يطابق الكود أو الإيميل
+        if (results.length === 0) {
+            return res.status(400).json({ message: "الكود غير صحيح أو منتهي الصلاحية" });
+        }
 
         const updateSql = "UPDATE users SET is_verified = 1, verification_code = NULL WHERE Email = ?";
         db.execute(updateSql, [Email], (upErr) => {
-            if (upErr) return res.status(500).send(upErr.message);
-            res.send("تم تفعيل الحساب بنجاح!");
+            if (upErr) {
+                return res.status(500).json({ message: upErr.message });
+            }
+            
+            // إرسال استجابة النجاح بصيغة JSON
+            res.status(200).json({ 
+                message: "تم تفعيل الحساب بنجاح!" 
+            });
         });
     });
 });
@@ -191,21 +221,40 @@ app.post('/verify', (req, res) => {
 app.post('/login', (req, res) => {
     const { Email, password } = req.body;
 
+    // التحقق من المدخلات الأساسية أولاً
+    if (!Email || !password) {
+        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني وكلمة المرور" });
+    }
+
     const sql = "SELECT * FROM users WHERE Email = ?";
     db.execute(sql, [Email], async (err, results) => {
-        if (err) return res.status(500).send(err.message);
-        if (results.length === 0) return res.status(404).send("المستخدم غير موجود");
+        if (err) {
+            return res.status(500).json({ message: err.message });
+        }
+        
+        // إذا لم يتم العثور على المستخدم
+        if (results.length === 0) {
+            return res.status(404).json({ message: "المستخدم غير موجود" });
+        }
 
         const user = results[0];
 
-        if (user.is_verified === 0) return res.status(403).send("برجاء تفعيل الحساب أولاً");
+        // التحقق مما إذا كان الحساب مفعلاً أم لا
+        if (user.is_verified === 0) {
+            return res.status(403).json({ message: "برجاء تفعيل الحساب أولاً" });
+        }
 
+        // مقارنة كلمة المرور
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(401).send("كلمة السر خطأ");
+        if (!isMatch) {
+            return res.status(401).json({ message: "كلمة السر خطأ" });
+        }
 
-        const token = jwt.sign({ id: user.UserID }, 'secret_key')
+        // إنشاء الـ Token (يفضل وضع الـ secret_key في ملف .env مستقبلاً)
+        const token = jwt.sign({ id: user.UserID }, 'secret_key');
 
-        res.json({
+        // إرسال النجاح مع البيانات والتوكن بصيغة JSON (كانت صحيحة لديك بالفعل)
+        res.status(200).json({
             message: "تم تسجيل الدخول بنجاح",
             token: token,
             user: { id: user.UserID, name: user.FullName }
@@ -220,9 +269,13 @@ app.get('/doctors', (req, res) => {
     db.execute(sql, (err, results) => {
         if (err) {
             console.error("❌ خطأ في جلب بيانات الأطباء:", err.message);
-            return res.status(500).send("خطأ في السيرفر عند جلب البيانات");
+            // تحويل الـ send إلى json لحماية الفرونتيند من الـ SyntaxError
+            return res.status(500).json({ 
+                message: "خطأ في السيرفر عند جلب البيانات" 
+            });
         }
 
+        // استجابة النجاح (كانت ممتازة وصحيحة لديك)
         res.status(200).json({
             success: true,
             count: results.length,
@@ -237,8 +290,12 @@ app.get('/doctors/:id', (req, res) => {
     const sql = "SELECT * FROM doctors WHERE DoctorID = ?";
 
     db.execute(sql, [doctorId], (err, results) => {
-        if (err) return res.status(500).send(err.message);
-        if (results.length === 0) return res.status(404).send("الطبيب غير موجود");
+        if (err) {
+            return res.status(500).json({ message: err.message });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: "الطبيب غير موجود" });
+        }
 
         res.status(200).json(results[0]);
     });
@@ -249,10 +306,19 @@ app.post('/test-results', authenticateToken, (req, res) => {
     const { TestTypeID, ResultValue } = req.body;
     const UserID = req.user.id;
 
+    // تأكيد وجود المدخلات الأساسية
+    if (!TestTypeID || ResultValue === undefined) {
+        return res.status(400).json({ message: "برجاء إدخال نوع الاختبار والنتيجة" });
+    }
+
     const sql = "INSERT INTO testresults (UserID, TestTypeID, ResultValue) VALUES (?, ?, ?)";
 
     db.execute(sql, [UserID, TestTypeID, ResultValue], (err, result) => {
-        if (err) return res.status(500).send(err.message);
+        if (err) {
+            // تحويل الخطأ إلى JSON لمنع الـ SyntaxError في الفرونتيند
+            return res.status(500).json({ message: err.message });
+        }
+        
         res.status(201).json({ message: "تم إضافة نتيجة الاختبار بنجاح" });
     });
 });
@@ -277,7 +343,7 @@ app.get('/test-results', authenticateToken, (req, res) => {
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
             console.error("❌ خطأ في الاستعلام:", err.message);
-            return res.status(500).send("خطأ في جلب البيانات من قاعدة البيانات");
+            return res.status(500).json({ message: "خطأ في جلب البيانات من قاعدة البيانات" });
         }
 
         res.status(200).json({
@@ -294,89 +360,94 @@ app.post('/chat', authenticateToken, async (req, res) => {
         const { message } = req.body;
         const UserID = req.user.id;
 
-        if (!message) return res.status(400).send("الرسالة فارغة");
+        // 1. تعديل الاستجابة هنا لتكون JSON لحماية الفرونتيند
+        if (!message || message.trim() === "") {
+            return res.status(400).json({ 
+                success: false, 
+                reply: "الرسالة فارغة، يرجى كتابة شيء ما." 
+            });
+        }
 
+        // تم تنظيف السطر الأخير لتجنب تكرار رسالة المستخدم داخل الـ System Prompt
         const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
 
-                                Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
+Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
 
-                                You support users experiencing symptoms related to:
-                                - Depression
-                                - Anxiety
-                                - OCD (Obsessive Compulsive Disorder)
-                                - ADHD
-                                - PTSD
+You support users experiencing symptoms related to:
+- Depression
+- Anxiety
+- OCD (Obsessive Compulsive Disorder)
+- ADHD
+- PTSD
 
-                                ---
+---
 
-                                CORE BEHAVIOR:
+CORE BEHAVIOR:
 
-                                1. Emotional Support:
-                                - Always respond with empathy, warmth, and non-judgment.
-                                - Validate the user's feelings without labeling them as a medical condition.
+1. Emotional Support:
+- Always respond with empathy, warmth, and non-judgment.
+- Validate the user's feelings without labeling them as a medical condition.
 
-                                2. Smart Guidance (VERY IMPORTANT):
-                                - Based on the user's message, gently suggest the most relevant self-assessment test in the app.
-                                - Do NOT force or diagnose.
-                                - Use soft language like:
-                                - "Based on what you're describing..."
-                                - "You might benefit from trying..."
-                                - "It could be helpful to take the..."
+2. Smart Guidance (VERY IMPORTANT):
+- Based on the user's message, gently suggest the most relevant self-assessment test in the app.
+- Do NOT force or diagnose.
+- Use soft language like:
+- "Based on what you're describing..."
+- "You might benefit from trying..."
+- "It could be helpful to take the..."
 
-                                Examples:
-                                - If user expresses sadness, hopelessness → suggest Depression test
-                                - If user expresses excessive worry, panic → suggest Anxiety test
-                                - If user mentions distraction, lack of focus → suggest ADHD test
-                                - If user mentions intrusive thoughts or repetitive behaviors → suggest OCD test
-                                - If user mentions trauma or flashbacks → suggest PTSD test
+Examples:
+- If user expresses sadness, hopelessness → suggest Depression test
+- If user expresses excessive worry, panic → suggest Anxiety test
+- If user mentions distraction, lack of focus → suggest ADHD test
+- If user mentions intrusive thoughts or repetitive behaviors → suggest OCD test
+- If user mentions trauma or flashbacks → suggest PTSD test
 
-                                3. No Diagnosis Rule:
-                                - Never say:
-                                - "You have depression"
-                                - "You are diagnosed with..."
-                                - Any percentages or scores
+3. No Diagnosis Rule:
+- Never say:
+- "You have depression"
+- "You are diagnosed with..."
+- "Any percentages or scores"
 
-                                Instead say:
-                                - "You may be experiencing symptoms similar to..."
-                                - "It could be helpful to explore..."
+Instead say:
+- "You may be experiencing symptoms similar to..."
+- "It could be helpful to explore..."
 
-                                ---
+---
 
-                                4. Output Style:
-                                - Use simple Arabic (Egyptian dialect preferred)
-                                - Keep responses short, calming, and supportive
-                                - Avoid medical jargon
+4. Output Style:
+- Use simple Arabic (Egyptian dialect preferred)
+- Keep responses short, calming, and supportive
+- Avoid medical jargon
 
-                                ---
+---
 
-                                5. App Integration Goal:
-                                Your main goal is to guide users toward the app's self-assessment feature.
+5. App Integration Goal:
+- Your main goal is to guide users toward the app's self-assessment feature.
 
-                                When appropriate, suggest:
-                                - "You can take the Depression self-assessment test in the app to better understand your feelings."
-                                - "There is an Anxiety check in the app that might help you reflect on what you're feeling."
+When appropriate, suggest:
+- "You can take the Depression self-assessment test in the app to better understand your feelings."
+- "There is an Anxiety check in the app that might help you reflect on what you're feeling."
 
-                                ---
+---
 
-                                6. Crisis Handling:
-                                If user expresses self-harm or severe distress:
-                                - Respond with immediate empathy
-                                - Encourage reaching out to a trusted person or professional help
-                                - Do NOT leave user alone with instructions or technical suggestions
+6. Crisis Handling:
+- If user expresses self-harm or severe distress:
+- Respond with immediate empathy
+- Encourage reaching out to a trusted person or professional help
+- Do NOT leave user alone with instructions or technical suggestions
 
-                                ---
+---
 
-                                7. Final Objective:
-                                Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.
+7. Final Objective:
+- Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.`;
 
-                                user message: ${message}`;
-
-        // إرسال الطلب لـ Groq
+        // إرسال الطلب لـ Groq بشكل منظم وصحيح
         const result = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: message }
+                { role: "user", content: message } // رسالة المستخدم تمرر هنا فقط بشكل نقي
             ],
             max_tokens: 1024
         });
@@ -386,9 +457,12 @@ app.post('/chat', authenticateToken, async (req, res) => {
         // حفظ المحادثة في الداتابيز
         const sql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
         db.execute(sql, [UserID, message, aiText], (err) => {
-            if (err) console.error("خطأ في حفظ الرسالة:", err.message);
+            if (err) {
+                console.error("❌ خطأ في حفظ الرسالة في الداتابيز:", err.message);
+                // لا نوقف العملية حتى لو فشل الحفظ، نرسل الرد للمستخدم على أي حال
+            }
 
-            res.json({
+            res.status(200).json({
                 success: true,
                 reply: aiText
             });
@@ -415,22 +489,30 @@ app.post('/chat', authenticateToken, async (req, res) => {
 app.post('/forgot-password', (req, res) => {
     const { Email } = req.body;
 
-    if (!Email) return res.status(400).send("برجاء إدخال البريد الإلكتروني");
+    // تحويل الـ send الأول إلى json
+    if (!Email) {
+        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني" });
+    }
 
     // 1. التأكد أولاً أن الإيميل مسجل في الحسابات الفعالة
     const sqlCheck = "SELECT * FROM users WHERE Email = ? AND is_verified = 1";
     db.execute(sqlCheck, [Email], (err, results) => {
-        if (err) return res.status(500).send(err.message);
-        if (results.length === 0) return res.status(404).send("هذا البريد الإلكتروني غير مسجل أو غير مفعل");
+        if (err) {
+            return res.status(500).json({ message: err.message });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: "هذا البريد الإلكتروني غير مسجل أو غير مفعل" });
+        }
 
         // 2. توليد كود الـ OTP
         const resetOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
         // 3. حفظ أو تحديث الكود في الجدول المنفصل (password_resets)
-        // استخدمنا REPLACE INTO عشان لو طلب كود تاني يمسح القديم ويحدثه فوراً بالوقت الجديد
         const sqlInsertReset = "REPLACE INTO password_resets (Email, token_code) VALUES (?, ?)";
         db.execute(sqlInsertReset, [Email, resetOtpCode], (upErr) => {
-            if (upErr) return res.status(500).send(upErr.message);
+            if (upErr) {
+                return res.status(500).json({ message: upErr.message });
+            }
 
             // 4. إرسال الإيميل
             const mailOptions = {
@@ -452,7 +534,10 @@ app.post('/forgot-password', (req, res) => {
             };
 
             transporter.sendMail(mailOptions, (mailErr) => {
-                if (mailErr) return res.status(500).send("فشل في إرسال الإيميل");
+                if (mailErr) {
+                    return res.status(500).json({ message: "فشل في إرسال الإيميل، يرجى المحاولة لاحقاً" });
+                }
+                
                 res.status(200).json({ 
                     success: true, 
                     message: "تم إرسال كود إعادة التعيين بنجاح.",
@@ -467,31 +552,40 @@ app.post('/forgot-password', (req, res) => {
 app.post('/verify-reset-code', (req, res) => {
     const { Email, code } = req.body;
 
-    if (!Email || !code) return res.status(400).send("برجاء إدخال الإيميل والكود");
+    // 1. تحويل التحقق الأولي إلى JSON
+    if (!Email || !code) {
+        return res.status(400).json({ message: "برجاء إدخال الإيميل والكود" });
+    }
 
     // جلب بيانات الكود من الجدول المنفصل
     const sql = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ?";
     db.execute(sql, [Email], (err, results) => {
-        if (err) return res.status(500).send(err.message);
-        if (results.length === 0) return res.status(400).send("لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته");
+        if (err) {
+            return res.status(500).json({ message: err.message });
+        }
+        if (results.length === 0) {
+            return res.status(400).json({ message: "لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته" });
+        }
 
         const record = results[0];
 
-        // 1. التشييك على الوقت (لو عدى أكتر من 10 دقائق)
+        // 2. التشييك على الوقت (لو عدى أكتر من 10 دقائق) وتحويل الرد إلى JSON
         if (record.minutes_passed > 10) {
             // نحذفه من جدول الريسيت عشان ننظف أول بأول
             db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
-            return res.status(400).send("انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد");
+            return res.status(400).json({ message: "انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد" });
         }
 
-        // 2. التشييك على صحة الكود
+        // 3. التشييك على صحة الكود وتحويل الرد إلى JSON
         if (record.token_code !== code) {
-            return res.status(400).send("الكود غير صحيح");
+            return res.status(400).json({ message: "الكود غير صحيح" });
         }
 
-        // 3. الكود صح وضمن الـ 10 دقائق ➔ نقوم بتحديث الكود لكلمة 'VERIFIED' كإثبات للخطوة الثالثة
+        // 4. الكود صح وضمن الـ 10 دقائق ➔ نقوم بتحديث الكود لكلمة 'VERIFIED' كإثبات للخطوة الثالثة
         db.execute("UPDATE password_resets SET token_code = 'VERIFIED' WHERE Email = ?", [Email], (verErr) => {
-            if (verErr) return res.status(500).send(verErr.message);
+            if (verErr) {
+                return res.status(500).json({ message: verErr.message });
+            }
 
             res.status(200).json({
                 success: true,
@@ -505,32 +599,41 @@ app.post('/verify-reset-code', (req, res) => {
 app.put('/reset-password', async (req, res) => {
     const { Email, password } = req.body;
 
-    if (!Email || !password) return res.status(400).send("البيانات المطلوبة غير مكتملة");
+    // 1. تحويل التحقق الأولي إلى JSON
+    if (!Email || !password) {
+        return res.status(400).json({ message: "البيانات المطلوبة غير مكتملة" });
+    }
 
-    // التحقق من قوة الباسورد الجديد
+    // 2. التحقق من قوة الباسورد الجديد
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
-    if (!passwordRegex.test(password)) return res.status(400).send("كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)");
+    if (!passwordRegex.test(password)) {
+        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)" });
+    }
 
-    // 🔍 التعديل الجديد: التشييك أولاً في جدول المستخدمين الرئيسي للتأكد من وجود الإيميل
+    // 🔍 التشييك أولاً في جدول المستخدمين الرئيسي للتأكد من وجود الإيميل
     const sqlCheckUser = "SELECT * FROM users WHERE Email = ?";
     db.execute(sqlCheckUser, [Email], (userErr, userResults) => {
-        if (userErr) return res.status(500).send(userErr.message);
+        if (userErr) {
+            return res.status(500).json({ message: userErr.message });
+        }
         
         // لو الإيميل مش موجود في الداتابيز أصلاً
         if (userResults.length === 0) {
-            return res.status(404).send("هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً");
+            return res.status(404).json({ message: "هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً" });
         }
 
         // لو الحساب موجود، نبدأ نشيك على حالة التفعيل والوقت في جدول password_resets
         const sqlCheckReset = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
         db.execute(sqlCheckReset, [Email], async (resetErr, resetResults) => {
-            if (resetErr) return res.status(500).send(resetErr.message);
+            if (resetErr) {
+                return res.status(500).json({ message: resetErr.message });
+            }
             
             // لو الإيميل موجود بس مأكدش الكود في الخطوة التانية، أو الوقت (10 دقائق) انتهى
             if (resetResults.length === 0 || resetResults[0].minutes_passed > 10) {
                 // تنظيف الجدول وحذف السجل المنتهي
                 db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
-                return res.status(403).send("طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى");
+                return res.status(403).json({ message: "طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى" });
             }
 
             try {
@@ -540,7 +643,9 @@ app.put('/reset-password', async (req, res) => {
                 // تحديث الباسورد في جدول الـ users
                 const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
                 db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
-                    if (upErr) return res.status(500).send(upErr.message);
+                    if (upErr) {
+                        return res.status(500).json({ message: upErr.message });
+                    }
 
                     // حذف السجل المؤقت من جدول الـ password_resets بعد النجاح
                     db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
@@ -551,13 +656,14 @@ app.put('/reset-password', async (req, res) => {
                     });
                 });
             } catch (error) {
-                res.status(500).send("خطأ في السيرفر أثناء تشفير كلمة المرور");
+                // تحويل خطأ الـ catch إلى JSON
+                res.status(500).json({ message: "خطأ في السيرفر أثناء تشفير كلمة المرور" });
             }
         });
     });
 });
 
-
+// --- جلب تاريخ الشات للمستخدم الحالي ---
 app.get('/chat/history', authenticateToken, (req, res) => {
     const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
 
@@ -565,13 +671,17 @@ app.get('/chat/history', authenticateToken, (req, res) => {
 
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
-            console.error("خطأ في جلب تاريخ الشات:", err.message);
-            return res.status(500).json({ error: "فشل في تحميل المحادثات القديمة" });
+            console.error("❌ خطأ في جلب تاريخ الشات:", err.message);
+            // تعديل مفتاح الخطأ إلى message لتوحيد نمط الاستجابة مع بقية التطبيق
+            return res.status(500).json({ 
+                message: "فشل في تحميل المحادثات القديمة" 
+            });
         }
 
-        res.json({
+        // استجابة النجاح
+        res.status(200).json({
             success: true,
-            history: results // دي مصفوفة (Array) فيها كل الرسايل
+            history: results // مصفوفة (Array) تحتوي على الرسائل السابقة مرتبة زمنياً تصاعدياً
         });
     });
 });
@@ -597,13 +707,16 @@ app.get('/tests', (req, res) => {
     });
 });
 
-// 2. جلب معلومات اختبار معين والأسئلة الخاصة به عن طريق الـ ID
+// --- 2. جلب معلومات اختبار معين والأسئلة الخاصة به عن طريق الـ ID ---
 app.get('/tests/:testId', (req, res) => {
     const testId = req.params.testId;
 
-    // التأكد إن الـ ID مبعوث وهو عبارة عن رقم
+    // التأكد إن الـ ID مبعوث وهو عبارة عن رقم وتحويل الرد لـ JSON موحد
     if (!testId || isNaN(testId)) {
-        return res.status(400).json({ success: false, error: "Valid Test ID is required" });
+        return res.status(400).json({ 
+            success: false, 
+            message: "معرف الاختبار غير صحيح أو غير موجود" 
+        });
     }
 
     // 1️⃣ الاستعلام الأول: جلب بيانات الاختبار نفسه
@@ -612,12 +725,18 @@ app.get('/tests/:testId', (req, res) => {
     db.execute(testSql, [testId], (testErr, testResults) => {
         if (testErr) {
             console.error(`❌ خطأ أثناء جلب بيانات الاختبار رقم ${testId}:`, testErr.message);
-            return res.status(500).json({ success: false, error: "Internal Server Error" });
+            return res.status(500).json({ 
+                success: false, 
+                message: "حدث خطأ في السيرفر أثناء جلب بيانات الاختبار" 
+            });
         }
 
-        // لو الـ ID مش موجود في جدول الاختبارات اصلاً
+        // لو الـ ID مش موجود في جدول الاختبارات أصلاً
         if (testResults.length === 0) {
-            return res.status(404).json({ success: false, error: "Test not found" });
+            return res.status(404).json({ 
+                success: false, 
+                message: "هذا الاختبار غير موجود" 
+            });
         }
 
         // حفظ بيانات الاختبار في أوبجكت لوحده
@@ -629,10 +748,13 @@ app.get('/tests/:testId', (req, res) => {
         db.execute(questionsSql, [testId], (qErr, qResults) => {
             if (qErr) {
                 console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, qErr.message);
-                return res.status(500).json({ success: false, error: "Internal Server Error" });
+                return res.status(500).json({ 
+                    success: false, 
+                    message: "حدث خطأ في السيرفر أثناء جلب أسئلة الاختبار" 
+                });
             }
 
-            // 🚀 إرسال الـ Response بالتقسيمة المطلوبة
+            // 🚀 إرسال الـ Response بالتقسيمة المطلوبة (تنسيق ممتاز جداً ومنظم)
             res.status(200).json({
                 success: true,
                 // أوبجكت يحتوي على معلومات الاختبار بالكامل
@@ -643,7 +765,7 @@ app.get('/tests/:testId', (req, res) => {
                     normal_range: testInfo.NormalRange,
                     total_questions_expected: testInfo.TotalQuestions
                 },
-                // أوبجكت (أو مصفوفة أوبجكتس) للأسئلة فقط
+                // أوبجكت يحتوي على مصفوفة الأسئلة
                 questions_data: {
                     total_questions_found: qResults.length,
                     questions: qResults
