@@ -74,31 +74,46 @@ app.post('/register', async (req, res) => {
     // 1. التحقق من صحة الإيميل
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(Email)) {
-        return res.status(400).json({ message: "برجاء إدخال بريد إلكتروني صحيح" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال بريد إلكتروني صحيح" 
+        });
     }
 
     // 2. التحقق من رقم التليفون
     const phoneRegex = /^01[0125][0-9]{8}$/;
     if (!phoneRegex.test(Phone)) {
-        return res.status(400).json({ message: "رقم التليفون غير صحيح (11 رقم مصري)" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "رقم التليفون غير صحيح (11 رقم مصري)" 
+        });
     }
 
-    // 3. التحقق من قوة كلمة السر
+    // 3. التحقق من قوة كلمة السر (التحديث الجديد للـ Regex شامل الرموز)
     const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
     if (!passwordRegex.test(password)) {
-        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم, رمز)" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم، رمز)" 
+        });
     }
 
     // 4. التحقق من الجنس
     const validGenders = ['male', 'female'];
     if (!validGenders.includes(Gender?.toLowerCase())) {
-        return res.status(400).json({ message: "يجب اختيار male أو female" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "يجب اختيار male أو female" 
+        });
     }
 
     // 5. التحقق من تاريخ الميلاد
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(DateOfBirth) || isNaN(new Date(DateOfBirth).getTime())) {
-        return res.status(400).json({ message: "تنسيق تاريخ الميلاد غير صحيح (YYYY-MM-DD)" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "تنسيق تاريخ الميلاد غير صحيح (YYYY-MM-DD)" 
+        });
     }
 
     try {
@@ -110,11 +125,17 @@ app.post('/register', async (req, res) => {
 
         db.execute(sql, [FullName, Email, hashedPassword, Phone, Gender.toLowerCase(), DateOfBirth, otpCode], (err, result) => {
             if (err) {
-                // إرجاع خطأ تكرار الحساب بتنسيق JSON
+                // إرجاع خطأ تكرار الحساب
                 if (err.code === 'ER_DUP_ENTRY') {
-                    return res.status(400).json({ message: "الايميل موجود بالفعل" });
+                    return res.status(400).json({ 
+                        status: "failed",
+                        message: "الايميل موجود بالفعل" 
+                    });
                 }
-                return res.status(500).json({ message: err.message });
+                return res.status(500).json({ 
+                    status: "failed",
+                    message: err.message 
+                });
             }
 
             const mailOptions = {
@@ -165,7 +186,9 @@ app.post('/register', async (req, res) => {
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
                     console.error("❌ فشل إرسال الإيميل:", error.message);
+                    // يعتبر failed جزئياً لأن الإيميل لم يصل
                     return res.status(201).json({
+                        status: "failed",
                         message: "تم إنشاء الحساب، ولكن فشل إرسال كود التفعيل.",
                         error: error.message
                     });
@@ -173,13 +196,17 @@ app.post('/register', async (req, res) => {
 
                 console.log("✅ تم إرسال الإيميل بنجاح:", info.response);
                 res.status(201).json({
+                    status: "success",
                     message: "تم إنشاء الحساب بنجاح. برجاء فحص إيميلك لتفعيل الحساب.",
                     debug_otp: otpCode
                 });
             });
         });
     } catch (error) {
-        res.status(500).json({ message: "خطأ في السيرفر" });
+        res.status(500).json({ 
+            status: "failed",
+            message: "خطأ داخلي في السيرفر" 
+        });
     }
 });
 
@@ -187,30 +214,43 @@ app.post('/register', async (req, res) => {
 app.post('/verify', (req, res) => {
     const { Email, code } = req.body;
 
-    // التحقق من وجود المدخلات الأساسية أولاً كحماية إضافية
+    // 1. التحقق من وجود المدخلات الأساسية
     if (!Email || !code) {
-        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني وكود التفعيل" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال البريد الإلكتروني وكود التفعيل" 
+        });
     }
 
     const sql = "SELECT * FROM users WHERE Email = ? AND verification_code = ?";
     db.execute(sql, [Email, code], (err, results) => {
         if (err) {
-            return res.status(500).json({ message: err.message });
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
         
-        // إذا لم يطابق الكود أو الإيميل
+        // 2. إذا لم يطابق الكود أو الإيميل
         if (results.length === 0) {
-            return res.status(400).json({ message: "الكود غير صحيح أو منتهي الصلاحية" });
+            return res.status(400).json({ 
+                status: "failed",
+                message: "الكود غير صحيح أو منتهي الصلاحية" 
+            });
         }
 
         const updateSql = "UPDATE users SET is_verified = 1, verification_code = NULL WHERE Email = ?";
         db.execute(updateSql, [Email], (upErr) => {
             if (upErr) {
-                return res.status(500).json({ message: upErr.message });
+                return res.status(500).json({ 
+                    status: "failed",
+                    message: upErr.message 
+                });
             }
             
-            // إرسال استجابة النجاح بصيغة JSON
+            // 3. إرسال استجابة النجاح بنجاح
             res.status(200).json({ 
+                status: "success",
                 message: "تم تفعيل الحساب بنجاح!" 
             });
         });
@@ -221,40 +261,56 @@ app.post('/verify', (req, res) => {
 app.post('/login', (req, res) => {
     const { Email, password } = req.body;
 
-    // التحقق من المدخلات الأساسية أولاً
+    // 1. التحقق من المدخلات الأساسية أولاً
     if (!Email || !password) {
-        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني وكلمة المرور" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال البريد الإلكتروني وكلمة المرور" 
+        });
     }
 
     const sql = "SELECT * FROM users WHERE Email = ?";
     db.execute(sql, [Email], async (err, results) => {
         if (err) {
-            return res.status(500).json({ message: err.message });
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
         
-        // إذا لم يتم العثور على المستخدم
+        // 2. إذا لم يتم العثور على المستخدم
         if (results.length === 0) {
-            return res.status(404).json({ message: "المستخدم غير موجود" });
+            return res.status(404).json({ 
+                status: "failed",
+                message: "المستخدم غير موجود" 
+            });
         }
 
         const user = results[0];
 
-        // التحقق مما إذا كان الحساب مفعلاً أم لا
+        // 3. التحقق مما إذا كان الحساب مفعلاً أم لا
         if (user.is_verified === 0) {
-            return res.status(403).json({ message: "برجاء تفعيل الحساب أولاً" });
+            return res.status(403).json({ 
+                status: "failed",
+                message: "برجاء تفعيل الحساب أولاً" 
+            });
         }
 
-        // مقارنة كلمة المرور
+        // 4. مقارنة كلمة المرور
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(401).json({ message: "كلمة السر خطأ" });
+            return res.status(401).json({ 
+                status: "failed",
+                message: "كلمة السر خطأ" 
+            });
         }
 
-        // إنشاء الـ Token (يفضل وضع الـ secret_key في ملف .env مستقبلاً)
+        // 5. إنشاء الـ Token (يفضل وضع الـ secret_key في ملف .env مستقبلاً)
         const token = jwt.sign({ id: user.UserID }, 'secret_key');
 
-        // إرسال النجاح مع البيانات والتوكن بصيغة JSON (كانت صحيحة لديك بالفعل)
+        // 6. إرسال استجابة النجاح المتكاملة
         res.status(200).json({
+            status: "success",
             message: "تم تسجيل الدخول بنجاح",
             token: token,
             user: { id: user.UserID, name: user.FullName }
@@ -269,14 +325,16 @@ app.get('/doctors', (req, res) => {
     db.execute(sql, (err, results) => {
         if (err) {
             console.error("❌ خطأ في جلب بيانات الأطباء:", err.message);
-            // تحويل الـ send إلى json لحماية الفرونتيند من الـ SyntaxError
+            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
             return res.status(500).json({ 
+                status: "failed",
                 message: "خطأ في السيرفر عند جلب البيانات" 
             });
         }
 
-        // استجابة النجاح (كانت ممتازة وصحيحة لديك)
+        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
+            status: "success",
             success: true,
             count: results.length,
             data: results
@@ -291,41 +349,64 @@ app.get('/doctors/:id', (req, res) => {
 
     db.execute(sql, [doctorId], (err, results) => {
         if (err) {
-            return res.status(500).json({ message: err.message });
+            // إضافة حقل status: "failed" في حالة خطأ السيرفر
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
+        
+        // إذا لم يتم العثور على الطبيب بالـ ID الممرر
         if (results.length === 0) {
-            return res.status(404).json({ message: "الطبيب غير موجود" });
+            return res.status(404).json({ 
+                status: "failed",
+                message: "الطبيب غير موجود" 
+            });
         }
 
-        res.status(200).json(results[0]);
+        // استجابة النجاح وتمرير البيانات داخل كائن موحد
+        res.status(200).json({
+            status: "success",
+            data: results[0]
+        });
     });
 });
 
 // --- إضافة نتيجة اختبار ---
 app.post('/test-results', authenticateToken, (req, res) => {
     const { TestTypeID, ResultValue } = req.body;
-    const UserID = req.user.id;
+    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
 
-    // تأكيد وجود المدخلات الأساسية
+    // 1. تأكيد وجود المدخلات الأساسية
     if (!TestTypeID || ResultValue === undefined) {
-        return res.status(400).json({ message: "برجاء إدخال نوع الاختبار والنتيجة" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال نوع الاختبار والنتيجة" 
+        });
     }
 
     const sql = "INSERT INTO testresults (UserID, TestTypeID, ResultValue) VALUES (?, ?, ?)";
 
     db.execute(sql, [UserID, TestTypeID, ResultValue], (err, result) => {
         if (err) {
-            // تحويل الخطأ إلى JSON لمنع الـ SyntaxError في الفرونتيند
-            return res.status(500).json({ message: err.message });
+            // 2. تحويل الخطأ إلى JSON مع إضافة حقل الـ status لتوحيد الاستجابة
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
         
-        res.status(201).json({ message: "تم إضافة نتيجة الاختبار بنجاح" });
+        // 3. استجابة النجاح الموحدة
+        res.status(201).json({ 
+            status: "success",
+            message: "تم إضافة نتيجة الاختبار بنجاح" 
+        });
     });
 });
 
 // --- عرض نتائج الاختبارات ---
 app.get('/test-results', authenticateToken, (req, res) => {
-    const UserID = req.user.id;
+    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
 
     // استخدمنا JOIN لربط الجدولين عن طريق TestTypeID
     const sql = `
@@ -343,10 +424,16 @@ app.get('/test-results', authenticateToken, (req, res) => {
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
             console.error("❌ خطأ في الاستعلام:", err.message);
-            return res.status(500).json({ message: "خطأ في جلب البيانات من قاعدة البيانات" });
+            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
+            return res.status(500).json({ 
+                status: "failed",
+                message: "خطأ في جلب البيانات من قاعدة البيانات" 
+            });
         }
 
+        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
+            status: "success",
             success: true,
             count: results.length,
             data: results
@@ -360,9 +447,10 @@ app.post('/chat', authenticateToken, async (req, res) => {
         const { message } = req.body;
         const UserID = req.user.id;
 
-        // 1. تعديل الاستجابة هنا لتكون JSON لحماية الفرونتيند
+        // 1. تعديل الاستجابة هنا لتكون JSON لحماية الفرونتيند وإضافة status: "failed"
         if (!message || message.trim() === "") {
             return res.status(400).json({ 
+                status: "failed",
                 success: false, 
                 reply: "الرسالة فارغة، يرجى كتابة شيء ما." 
             });
@@ -462,7 +550,9 @@ When appropriate, suggest:
                 // لا نوقف العملية حتى لو فشل الحفظ، نرسل الرد للمستخدم على أي حال
             }
 
+            // استجابة النجاح الموحدة
             res.status(200).json({
+                status: "success",
                 success: true,
                 reply: aiText
             });
@@ -471,14 +561,18 @@ When appropriate, suggest:
     } catch (error) {
         console.error("Groq Error:", error);
 
+        // خطأ الـ Rate Limit تخطي الحد المسموح
         if (error.status === 429) {
             return res.status(503).json({
+                status: "failed",
                 success: false,
                 reply: "الخدمة مشغولة حالياً، برجاء المحاولة بعد قليل 🙏"
             });
         }
 
+        // خطأ السيرفر الداخلي
         res.status(500).json({
+            status: "failed",
             success: false,
             reply: "حدث خطأ في التواصل مع الذكاء الاصطناعي"
         });
@@ -489,32 +583,44 @@ When appropriate, suggest:
 app.post('/forgot-password', (req, res) => {
     const { Email } = req.body;
 
-    // تحويل الـ send الأول إلى json
+    // 1. التحقق من وجود الإيميل في الطلب
     if (!Email) {
-        return res.status(400).json({ message: "برجاء إدخال البريد الإلكتروني" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال البريد الإلكتروني" 
+        });
     }
 
-    // 1. التأكد أولاً أن الإيميل مسجل في الحسابات الفعالة
+    // 2. التأكد أولاً أن الإيميل مسجل في الحسابات الفعالة
     const sqlCheck = "SELECT * FROM users WHERE Email = ? AND is_verified = 1";
     db.execute(sqlCheck, [Email], (err, results) => {
         if (err) {
-            return res.status(500).json({ message: err.message });
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
         if (results.length === 0) {
-            return res.status(404).json({ message: "هذا البريد الإلكتروني غير مسجل أو غير مفعل" });
+            return res.status(404).json({ 
+                status: "failed",
+                message: "هذا البريد الإلكتروني غير مسجل أو غير مفعل" 
+            });
         }
 
-        // 2. توليد كود الـ OTP
+        // 3. توليد كود الـ OTP
         const resetOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // 3. حفظ أو تحديث الكود في الجدول المنفصل (password_resets)
+        // 4. حفظ أو تحديث الكود في الجدول المنفصل (password_resets)
         const sqlInsertReset = "REPLACE INTO password_resets (Email, token_code) VALUES (?, ?)";
         db.execute(sqlInsertReset, [Email, resetOtpCode], (upErr) => {
             if (upErr) {
-                return res.status(500).json({ message: upErr.message });
+                return res.status(500).json({ 
+                    status: "failed",
+                    message: upErr.message 
+                });
             }
 
-            // 4. إرسال الإيميل
+            // 5. إرسال الإيميل
             const mailOptions = {
                 from: '"Mental Health Support" <mental.health.auth@gmail.com>',
                 to: Email,
@@ -535,10 +641,15 @@ app.post('/forgot-password', (req, res) => {
 
             transporter.sendMail(mailOptions, (mailErr) => {
                 if (mailErr) {
-                    return res.status(500).json({ message: "فشل في إرسال الإيميل، يرجى المحاولة لاحقاً" });
+                    return res.status(500).json({ 
+                        status: "failed",
+                        message: "فشل في إرسال الإيميل، يرجى المحاولة لاحقاً" 
+                    });
                 }
                 
+                // 6. استجابة النجاح الموحدة
                 res.status(200).json({ 
+                    status: "success",
                     success: true, 
                     message: "تم إرسال كود إعادة التعيين بنجاح.",
                     debug_otp: resetOtpCode
@@ -552,19 +663,28 @@ app.post('/forgot-password', (req, res) => {
 app.post('/verify-reset-code', (req, res) => {
     const { Email, code } = req.body;
 
-    // 1. تحويل التحقق الأولي إلى JSON
+    // 1. التحقق من وجود المدخلات الأساسية
     if (!Email || !code) {
-        return res.status(400).json({ message: "برجاء إدخال الإيميل والكود" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "برجاء إدخال الإيميل والكود" 
+        });
     }
 
     // جلب بيانات الكود من الجدول المنفصل
     const sql = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ?";
     db.execute(sql, [Email], (err, results) => {
         if (err) {
-            return res.status(500).json({ message: err.message });
+            return res.status(500).json({ 
+                status: "failed",
+                message: err.message 
+            });
         }
         if (results.length === 0) {
-            return res.status(400).json({ message: "لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته" });
+            return res.status(400).json({ 
+                status: "failed",
+                message: "لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته" 
+            });
         }
 
         const record = results[0];
@@ -573,21 +693,32 @@ app.post('/verify-reset-code', (req, res) => {
         if (record.minutes_passed > 10) {
             // نحذفه من جدول الريسيت عشان ننظف أول بأول
             db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
-            return res.status(400).json({ message: "انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد" });
+            return res.status(400).json({ 
+                status: "failed",
+                message: "انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد" 
+            });
         }
 
         // 3. التشييك على صحة الكود وتحويل الرد إلى JSON
         if (record.token_code !== code) {
-            return res.status(400).json({ message: "الكود غير صحيح" });
+            return res.status(400).json({ 
+                status: "failed",
+                message: "الكود غير صحيح" 
+            });
         }
 
         // 4. الكود صح وضمن الـ 10 دقائق ➔ نقوم بتحديث الكود لكلمة 'VERIFIED' كإثبات للخطوة الثالثة
         db.execute("UPDATE password_resets SET token_code = 'VERIFIED' WHERE Email = ?", [Email], (verErr) => {
             if (verErr) {
-                return res.status(500).json({ message: verErr.message });
+                return res.status(500).json({ 
+                    status: "failed",
+                    message: verErr.message 
+                });
             }
 
+            // استجابة النجاح الموحدة
             res.status(200).json({
+                status: "success",
                 success: true,
                 message: "تم التحقق من الكود بنجاح. يمكنك الآن تعيين الباسورد الجديد."
             });
@@ -599,41 +730,59 @@ app.post('/verify-reset-code', (req, res) => {
 app.put('/reset-password', async (req, res) => {
     const { Email, password } = req.body;
 
-    // 1. تحويل التحقق الأولي إلى JSON
+    // 1. التحقق من اكتمال البيانات المطلوبة
     if (!Email || !password) {
-        return res.status(400).json({ message: "البيانات المطلوبة غير مكتملة" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "البيانات المطلوبة غير مكتملة" 
+        });
     }
 
-    // 2. التحقق من قوة الباسورد الجديد
+    // 2. التحقق من قوة الباسورد الجديد (مطابقة للـ Regex المحدّث سابقاً شامل الرموز إذا كنت تفضل توحيدها)
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
     if (!passwordRegex.test(password)) {
-        return res.status(400).json({ message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)" });
+        return res.status(400).json({ 
+            status: "failed",
+            message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)" 
+        });
     }
 
     // 🔍 التشييك أولاً في جدول المستخدمين الرئيسي للتأكد من وجود الإيميل
     const sqlCheckUser = "SELECT * FROM users WHERE Email = ?";
     db.execute(sqlCheckUser, [Email], (userErr, userResults) => {
         if (userErr) {
-            return res.status(500).json({ message: userErr.message });
+            return res.status(500).json({ 
+                status: "failed",
+                message: userErr.message 
+            });
         }
         
         // لو الإيميل مش موجود في الداتابيز أصلاً
         if (userResults.length === 0) {
-            return res.status(404).json({ message: "هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً" });
+            return res.status(404).json({ 
+                status: "failed",
+                message: "هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً" 
+            });
         }
 
         // لو الحساب موجود، نبدأ نشيك على حالة التفعيل والوقت في جدول password_resets
         const sqlCheckReset = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
         db.execute(sqlCheckReset, [Email], async (resetErr, resetResults) => {
             if (resetErr) {
-                return res.status(500).json({ message: resetErr.message });
+                return res.status(500).json({ 
+                    status: "failed",
+                    message: resetErr.message 
+                });
             }
             
             // لو الإيميل موجود بس مأكدش الكود في الخطوة التانية، أو الوقت (10 دقائق) انتهى
             if (resetResults.length === 0 || resetResults[0].minutes_passed > 10) {
                 // تنظيف الجدول وحذف السجل المنتهي
                 db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
-                return res.status(403).json({ message: "طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى" });
+                return res.status(403).json({ 
+                    status: "failed",
+                    message: "طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى" 
+                });
             }
 
             try {
@@ -644,20 +793,27 @@ app.put('/reset-password', async (req, res) => {
                 const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
                 db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
                     if (upErr) {
-                        return res.status(500).json({ message: upErr.message });
+                        return res.status(500).json({ 
+                            status: "failed",
+                            message: upErr.message 
+                        });
                     }
 
                     // حذف السجل المؤقت من جدول الـ password_resets بعد النجاح
                     db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
 
+                    // استجابة النجاح الموحدة
                     res.status(200).json({
+                        status: "success",
                         success: true,
                         message: "تم تغيير كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن."
                     });
                 });
             } catch (error) {
-                // تحويل خطأ الـ catch إلى JSON
-                res.status(500).json({ message: "خطأ في السيرفر أثناء تشفير كلمة المرور" });
+                res.status(500).json({ 
+                    status: "failed",
+                    message: "خطأ في السيرفر أثناء تشفير كلمة المرور" 
+                });
             }
         });
     });
@@ -672,14 +828,16 @@ app.get('/chat/history', authenticateToken, (req, res) => {
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
             console.error("❌ خطأ في جلب تاريخ الشات:", err.message);
-            // تعديل مفتاح الخطأ إلى message لتوحيد نمط الاستجابة مع بقية التطبيق
+            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
             return res.status(500).json({ 
+                status: "failed",
                 message: "فشل في تحميل المحادثات القديمة" 
             });
         }
 
-        // استجابة النجاح
+        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
+            status: "success",
             success: true,
             history: results // مصفوفة (Array) تحتوي على الرسائل السابقة مرتبة زمنياً تصاعدياً
         });
@@ -695,11 +853,17 @@ app.get('/tests', (req, res) => {
     db.execute(sql, (err, results) => {
         if (err) {
             console.error("❌ خطأ أثناء جلب الاختبارات:", err.message);
-            return res.status(500).json({ success: false, error: "Internal Server Error" });
+            // توحيد مفتاح الخطأ إلى message وإضافة حقل status: "failed" لحماية الفرونتيند
+            return res.status(500).json({ 
+                status: "failed",
+                success: false, 
+                message: "خطأ في السيرفر عند جلب البيانات" 
+            });
         }
         
-        // إرجاع النتيجة للفرونت-إند
+        // إرجاع النتيجة للفرونت-إند بعد إضافة حقل status: "success"
         res.status(200).json({
+            status: "success",
             success: true,
             count: results.length,
             tests: results
@@ -711,9 +875,10 @@ app.get('/tests', (req, res) => {
 app.get('/tests/:testId', (req, res) => {
     const testId = req.params.testId;
 
-    // التأكد إن الـ ID مبعوث وهو عبارة عن رقم وتحويل الرد لـ JSON موحد
+    // 1. التأكد إن الـ ID مبعوث وهو عبارة عن رقم
     if (!testId || isNaN(testId)) {
         return res.status(400).json({ 
+            status: "failed",
             success: false, 
             message: "معرف الاختبار غير صحيح أو غير موجود" 
         });
@@ -726,14 +891,16 @@ app.get('/tests/:testId', (req, res) => {
         if (testErr) {
             console.error(`❌ خطأ أثناء جلب بيانات الاختبار رقم ${testId}:`, testErr.message);
             return res.status(500).json({ 
+                status: "failed",
                 success: false, 
                 message: "حدث خطأ في السيرفر أثناء جلب بيانات الاختبار" 
             });
         }
 
-        // لو الـ ID مش موجود في جدول الاختبارات أصلاً
+        // 2. لو الـ ID مش موجود في جدول الاختبارات أصلاً
         if (testResults.length === 0) {
             return res.status(404).json({ 
+                status: "failed",
                 success: false, 
                 message: "هذا الاختبار غير موجود" 
             });
@@ -749,13 +916,15 @@ app.get('/tests/:testId', (req, res) => {
             if (qErr) {
                 console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, qErr.message);
                 return res.status(500).json({ 
+                    status: "failed",
                     success: false, 
                     message: "حدث خطأ في السيرفر أثناء جلب أسئلة الاختبار" 
                 });
             }
 
-            // 🚀 إرسال الـ Response بالتقسيمة المطلوبة (تنسيق ممتاز جداً ومنظم)
+            // 3. إرسال الـ Response بالتقسيمة المطلوبة مضافاً إليها حقل الـ status بنجاح
             res.status(200).json({
+                status: "success",
                 success: true,
                 // أوبجكت يحتوي على معلومات الاختبار بالكامل
                 test_details: {
