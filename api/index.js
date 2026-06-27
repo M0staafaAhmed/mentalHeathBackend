@@ -925,7 +925,7 @@ app.get('/tests', (req, res) => {
         const token = authHeader.split(' ')[1];
         try {
             // فك التوكن وسحب الـ ID (تأكد من اسم المفتاح عندك جوه التوكن زي UserID أو id)
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+            const decoded = jwt.verify(token, 'secret_key');
             userId = decoded.UserID || decoded.id; 
         } catch (jwtErr) {
             // لو التوكن بايز أو منتهي الصلاحية، مش هنوقع السيرفر، هنعتبره Visitor عادي
