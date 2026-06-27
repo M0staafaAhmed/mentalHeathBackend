@@ -36,14 +36,14 @@ const db = mysql.createPool({
     keepAliveInitialDelay: 0
 });
 
-// db.getConnection((err, connection) => {
-//     if (err) {
-//         console.error('Error connecting to Aiven:', err.message);
-//     } else {
-//         console.log('Connected to Aiven MySQL successfully!');
-//         connection.release();
-//     }
-// });
+db.getConnection((err, connection) => {
+    if (err) {
+        console.error('Error connecting to Aiven:', err.message);
+    } else {
+        console.log('Connected to Aiven MySQL successfully!');
+        connection.release();
+    }
+});
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
