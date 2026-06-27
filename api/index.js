@@ -917,18 +917,15 @@ app.get('/chat/history', authenticateToken, (req, res) => {
 // مبروك مقدماً على التقفيل.. ده الـ Endpoint المطور بالكامل:
 
 app.get('/tests', (req, res) => {
-    // 1. تشيك لو في توكن مبعوت في الـ Headers (بدون استخدام middleware إجباري يقفل الريكويست)
     const authHeader = req.headers.authorization;
     let userId = null;
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
         try {
-            // فك التوكن وسحب الـ ID (تأكد من اسم المفتاح عندك جوه التوكن زي UserID أو id)
             const decoded = jwt.verify(token, 'secret_key');
-            userId = decoded.UserID || decoded.id; 
+            userId = decoded.UserID || decoded.id;
         } catch (jwtErr) {
-            // لو التوكن بايز أو منتهي الصلاحية، مش هنوقع السيرفر، هنعتبره Visitor عادي
             console.log("ℹ️ Invalid or expired token, treating as guest visitor.");
         }
     }
@@ -936,9 +933,7 @@ app.get('/tests', (req, res) => {
     let sql = "";
     let queryParams = [];
 
-    // 2. بناء الـ Query بناءً على حالة المستخدم (مسجل ولا زائر)
     if (userId) {
-        // 🔥 سيناريو الـ User: بنعمل JOIN وبنعمل تشيك هل اسم الاختبار موجود جوه الـ recommended_tests المكتوبة في الجدول
         sql = `
             SELECT 
                 t.TestTypeID, 
@@ -947,7 +942,12 @@ app.get('/tests', (req, res) => {
                 t.NormalRange, 
                 t.TotalQuestions,
                 CASE 
-                    WHEN r.recommended_tests IS NOT NULL AND FIND_IN_SET(LOWER(t.TestName), LOWER(r.recommended_tests)) > 0 THEN true
+                    WHEN r.recommended_tests IS NOT NULL 
+                    AND FIND_IN_SET(
+                        LOWER(TRIM(CONVERT(t.TestName USING utf8mb4) COLLATE utf8mb4_unicode_ci)),
+                        LOWER(REPLACE(CONVERT(r.recommended_tests USING utf8mb4) COLLATE utf8mb4_unicode_ci, ' ', ''))
+                    ) > 0 
+                    THEN true
                     ELSE false
                 END AS isRecommended
             FROM testtypes t
@@ -956,12 +956,11 @@ app.get('/tests', (req, res) => {
         `;
         queryParams = [userId];
     } else {
-        // 🌿 سيناريو الـ Visitor: بنرجع الداتا العادية وكل الاختبارات معاها false
         sql = `
             SELECT 
                 TestTypeID, 
                 TestName, 
-                ` + "Description" + `, 
+                Description, 
                 NormalRange, 
                 TotalQuestions,
                 false AS isRecommended
@@ -970,7 +969,6 @@ app.get('/tests', (req, res) => {
         `;
     }
 
-    // 3. تنفيذ الـ Query المحددة
     db.execute(sql, queryParams, (err, results) => {
         if (err) {
             console.error("❌ خطأ أثناء جلب الاختبارات:", err.message);
@@ -981,13 +979,11 @@ app.get('/tests', (req, res) => {
             });
         }
 
-        // تحويل الـ 1 و 0 اللي طالعين من الـ SQL لـ true و false حقيقيين للفرونتيند
         const formattedResults = results.map(test => ({
             ...test,
-            isRecommended: !!test.isRecommended // تحويل لـ Boolean حقيقي
+            isRecommended: !!test.isRecommended
         }));
 
-        // إرجاع النتيجة للفرونت-إند
         res.status(200).json({
             status: "success",
             success: true,
