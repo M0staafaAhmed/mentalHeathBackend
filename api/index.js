@@ -31,19 +31,19 @@ const db = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 1,        // ← غيّرها من 10 لـ 1
     queueLimit: 0,
-    connectTimeout: 10000,     // ← أضف ده
-    acquireTimeout: 10000,     // ← أضف ده
-    idleTimeoutMillis: 10000   // ← أضف ده
+    connectTimeout: 10000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0
 });
 
-db.getConnection((err, connection) => {
-    if (err) {
-        console.error('Error connecting to Aiven:', err.message);
-    } else {
-        console.log('Connected to Aiven MySQL successfully!');
-        connection.release();
-    }
-});
+// db.getConnection((err, connection) => {
+//     if (err) {
+//         console.error('Error connecting to Aiven:', err.message);
+//     } else {
+//         console.log('Connected to Aiven MySQL successfully!');
+//         connection.release();
+//     }
+// });
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
