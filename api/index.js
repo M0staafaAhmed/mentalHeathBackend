@@ -344,19 +344,31 @@ app.post('/login', (req, res) => {
         // 5. إنشاء الـ Token
         const token = jwt.sign({ id: user.UserID }, 'secret_key');
 
-        // 6. استعلام لجلب إحصائيات الاختبارات للمستخدم الحالي
-        // الاستعلام ده بيجيب العدد الإجمالي، وبيجيب آخر سكور عن طريق Subquery بيرتب التواريخ تنازلياً ويأخذ أول صف
+        // 6. استعلام لجلب إحصائيات الاختبارات مع النسبة المئوية لآخر سكور
         const statsSql = `
             SELECT 
-                COUNT(TestResultID) AS totalTests,
-                (SELECT ResultValue FROM testresults WHERE UserID = ? ORDER BY ResultDate DESC LIMIT 1) AS lastScore
-            FROM testresults 
-            WHERE UserID = ?
+                COUNT(tr.TestResultID) AS totalTests,
+                (
+                    SELECT tr2.ResultValue 
+                    FROM testresults tr2 
+                    WHERE tr2.UserID = ? 
+                    ORDER BY tr2.ResultDate DESC 
+                    LIMIT 1
+                ) AS lastScore,
+                (
+                    SELECT tt.MaxScore 
+                    FROM testresults tr2 
+                    JOIN testtypes tt ON tr2.TestTypeID = tt.TestTypeID
+                    WHERE tr2.UserID = ? 
+                    ORDER BY tr2.ResultDate DESC 
+                    LIMIT 1
+                ) AS lastMaxScore
+            FROM testresults tr
+            WHERE tr.UserID = ?
         `;
 
-        db.execute(statsSql, [user.UserID, user.UserID], (statsErr, statsResults) => {
+        db.execute(statsSql, [user.UserID, user.UserID, user.UserID], (statsErr, statsResults) => {
             if (statsErr) {
-                // حتى لو حصل مشكلة هنا، ممكن تعديها أو ترجع error حسب تفضيلك، هنا هنرجع 500 للأمان
                 return res.status(500).json({
                     status: "failed",
                     message: "خطأ أثناء جلب إحصائيات الاختبارات: " + statsErr.message
@@ -364,12 +376,17 @@ app.post('/login', (req, res) => {
             }
 
             const stats = statsResults[0];
-
-            // إذا كان المستخدم معملش أي اختبارات قبل كده، الـ lastScore هيرجع null والـ totalTests هيرجع 0
             const totalTests = stats ? stats.totalTests : 0;
             const lastScore = stats ? stats.lastScore : null;
+            const lastMaxScore = stats ? stats.lastMaxScore : null;
 
-            // 7. إرسال استجابة النجاح المتكاملة مدمج معها بيانات الاختبارات
+            // حساب النسبة المئوية لآخر سكور
+            let lastScorePercentage = null;
+            if (lastScore !== null && lastMaxScore !== null && lastMaxScore > 0) {
+                lastScorePercentage = parseFloat(((lastScore / lastMaxScore) * 100).toFixed(2));
+            }
+
+            // 7. إرسال استجابة النجاح
             res.status(200).json({
                 status: "success",
                 message: "تم تسجيل الدخول بنجاح",
@@ -380,7 +397,7 @@ app.post('/login', (req, res) => {
                 },
                 stats: {
                     totalTests: totalTests,
-                    lastScore: lastScore
+                    lastScore: lastScorePercentage,
                 }
             });
         });
