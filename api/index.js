@@ -383,7 +383,7 @@ app.post('/login', (req, res) => {
             // حساب النسبة المئوية لآخر سكور
             let lastScorePercentage = null;
             if (lastScore !== null && lastMaxScore !== null && lastMaxScore > 0) {
-                lastScorePercentage = parseFloat(((lastScore / lastMaxScore) * 100).toFixed(2));
+                lastScorePercentage = Math.round((lastScore / lastMaxScore) * 100);
             }
 
             // 7. إرسال استجابة النجاح
