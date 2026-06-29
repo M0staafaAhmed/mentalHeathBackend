@@ -356,7 +356,7 @@ app.post('/login', (req, res) => {
                     LIMIT 1
                 ) AS lastScore,
                 (
-                    SELECT tt.MaxScore 
+                    SELECT tt.TotalQuestions * 3
                     FROM testresults tr2 
                     JOIN testtypes tt ON tr2.TestTypeID = tt.TestTypeID
                     WHERE tr2.UserID = ? 
@@ -380,7 +380,7 @@ app.post('/login', (req, res) => {
             const lastScore = stats ? stats.lastScore : null;
             const lastMaxScore = stats ? stats.lastMaxScore : null;
 
-            // حساب النسبة المئوية لآخر سكور
+            // حساب النسبة المئوية بنفس معادلة الفرونت
             let lastScorePercentage = null;
             if (lastScore !== null && lastMaxScore !== null && lastMaxScore > 0) {
                 lastScorePercentage = Math.round((lastScore / lastMaxScore) * 100);
@@ -398,6 +398,7 @@ app.post('/login', (req, res) => {
                 stats: {
                     totalTests: totalTests,
                     lastScore: lastScorePercentage,
+                    lastScorePercentage: lastScorePercentage
                 }
             });
         });
