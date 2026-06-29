@@ -11,12 +11,11 @@ const cors = require('cors');
 const app = express();
 app.use(express.json());
 app.use(cors({
-    origin: '*', // السماح لأي دومين بالوصول للـ API
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], // السماح بالطرق دي
-    allowedHeaders: ['Content-Type', 'Authorization'] // السماح بالرؤوس دي
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// إعداد Groq
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const db = mysql.createPool({
@@ -29,7 +28,7 @@ const db = mysql.createPool({
         rejectUnauthorized: false
     },
     waitForConnections: true,
-    connectionLimit: 1,        // ← غيّرها من 10 لـ 1
+    connectionLimit: 1,
     queueLimit: 0,
     connectTimeout: 10000,
     enableKeepAlive: true,
@@ -49,16 +48,15 @@ const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (!token) return res.status(401).send("يجب تسجيل الدخول أولاً");
+    if (!token) return res.status(401).send("You must be logged in first");
 
     jwt.verify(token, 'secret_key', (err, user) => {
-        if (err) return res.status(403).send("التوكن غير صالح أو انتهى");
+        if (err) return res.status(403).send("Token is invalid or expired");
         req.user = user;
         next();
     });
 };
 
-// --- إعداد مرسل الإيميلات (OTP) ---
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
@@ -69,53 +67,47 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// --- 1. تسجيل حساب جديد (Register) ---
+// --- 1. Register ---
 app.post('/register', async (req, res) => {
-    // استقبلنا أوبجكت onboarding الجديد هنا مع بيانات التسجيل
     const { FullName, Email, password, Phone, Gender, DateOfBirth, onboarding } = req.body;
 
-    // 1. التحقق من صحة الإيميل
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(Email)) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال بريد إلكتروني صحيح"
+            message: "Please enter a valid email address"
         });
     }
 
-    // 2. التحقق من رقم التليفون
     const phoneRegex = /^01[0125][0-9]{8}$/;
     if (!phoneRegex.test(Phone)) {
         return res.status(400).json({
             status: "failed",
-            message: "رقم التليفون غير صحيح (11 رقم مصري)"
+            message: "Invalid phone number (must be an 11-digit Egyptian number)"
         });
     }
 
-    // 3. التحقق من قوة كلمة السر (التحديث الجديد للـ Regex شامل الرموز)
     const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).json({
             status: "failed",
-            message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم، رمز)"
+            message: "Weak password (min 8 characters, uppercase, lowercase, number, symbol)"
         });
     }
 
-    // 4. التحقق من الجنس
     const validGenders = ['male', 'female'];
     if (!validGenders.includes(Gender?.toLowerCase())) {
         return res.status(400).json({
             status: "failed",
-            message: "يجب اختيار male أو female"
+            message: "Gender must be male or female"
         });
     }
 
-    // 5. التحقق من تاريخ الميلاد
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(DateOfBirth) || isNaN(new Date(DateOfBirth).getTime())) {
         return res.status(400).json({
             status: "failed",
-            message: "تنسيق تاريخ الميلاد غير صحيح (YYYY-MM-DD)"
+            message: "Invalid date of birth format (YYYY-MM-DD)"
         });
     }
 
@@ -131,7 +123,7 @@ app.post('/register', async (req, res) => {
                 if (err.code === 'ER_DUP_ENTRY') {
                     return res.status(400).json({
                         status: "failed",
-                        message: "الايميل موجود بالفعل"
+                        message: "This email is already registered"
                     });
                 }
                 return res.status(500).json({
@@ -140,16 +132,14 @@ app.post('/register', async (req, res) => {
                 });
             }
 
-            // 🔥 السحر هنا: طلعنا الـ UserID اللي لسه متباصي ومخلوق حالا في الداتا بيز
             const newUserId = userResult.insertId;
 
-            // دالة الإيميل والرد النهائي معزولة في سهم عشان نشغلها بعد حفظ الأونبوردنج أو لو مفيش أونبوردنج
             const sendVerificationEmailAndRespond = () => {
                 const mailOptions = {
                     from: '"Mental Health Support" <mental.health.auth@gmail.com>',
                     to: Email,
-                    subject: 'كود تفعيل حسابك - OTP',
-                    text: `أهلاً بك، كود التفعيل الخاص بك هو: ${otpCode}`,
+                    subject: 'Your Account Verification Code - OTP',
+                    text: `Welcome! Your verification code is: ${otpCode}`,
                     html: `
                         <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
                             <div style="background-color: #eff6ff; padding: 35px 20px; text-align: center;">
@@ -159,9 +149,9 @@ app.post('/register', async (req, res) => {
                                 <div style="width: 60px; height: 3px; background-color: #3b82f6; margin: 0 auto; border-radius: 10px;"></div>
                             </div>
                             <div style="padding: 45px 35px; text-align: center;">
-                                <h2 style="color: #0f172a; font-size: 22px; margin-bottom: 20px;">مرحباً بك في رحلتك الجديدة</h2>
+                                <h2 style="color: #0f172a; font-size: 22px; margin-bottom: 20px;">Welcome to your new journey</h2>
                                 <p style="color: #475569; font-size: 16px; line-height: 1.8; margin-bottom: 35px;">
-                                    نحن هنا لدعمك. لضمان أمان حسابك والبدء في استخدام المنصة، يرجى إدخال رمز التحقق التالي:
+                                    We are here to support you. To secure your account and start using the platform, please enter the following verification code:
                                 </p>
                                 <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 16px; padding: 25px; display: inline-block; min-width: 200px; margin-bottom: 35px;">
                                     <span style="font-size: 40px; font-weight: 900; letter-spacing: 10px; color: #2563eb; font-family: 'Courier New', Courier, monospace;">
@@ -169,12 +159,12 @@ app.post('/register', async (req, res) => {
                                     </span>
                                 </div>
                                 <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">
-                                    تنتهي صلاحية هذا الرمز خلال 10 دقائق.
+                                    This code expires in 10 minutes.
                                 </p>
                             </div>
                             <div style="background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #f1f5f9;">
                                 <p style="color: #64748b; font-size: 13px; margin: 0;">
-                                    خطوة صغيرة اليوم، تعني الكثير لغدٍ أفضل.
+                                    A small step today means a lot for a better tomorrow.
                                 </p>
                                 <div style="margin-top: 15px; border-top: 1px solid #e2e8f0; padding-top: 15px;">
                                     <p style="color: #94a3b8; font-size: 11px; margin-top: 10px;">
@@ -188,23 +178,22 @@ app.post('/register', async (req, res) => {
 
                 transporter.sendMail(mailOptions, (error, info) => {
                     if (error) {
-                        console.error("❌ فشل إرسال الإيميل:", error.message);
+                        console.error("❌ Failed to send email:", error.message);
                         return res.status(201).json({
                             status: "failed",
-                            message: "تم إنشاء الحساب، ولكن فشل إرسال كود التفعيل.",
+                            message: "Account created, but failed to send verification code.",
                             error: error.message
                         });
                     }
-                    console.log("✅ تم إرسال الإيميل بنجاح:", info.response);
+                    console.log("✅ Email sent successfully:", info.response);
                     res.status(201).json({
                         status: "success",
-                        message: "تم إنشاء الحساب بنجاح. برجاء فحص إيميلك لتفعيل الحساب.",
+                        message: "Account created successfully. Please check your email to activate your account.",
                         debug_otp: otpCode
                     });
                 });
             };
 
-            // ⚡ التشيك على وجود بيانات الأونبوردنج
             if (onboarding && onboarding.allScores) {
                 const testSql = `INSERT INTO recommended_tests 
                     (user_id, score_depression, score_anxiety, score_adhd, score_ocd, score_ptsd, highest_score, recommended_tests, has_tie) 
@@ -218,43 +207,39 @@ app.post('/register', async (req, res) => {
                     onboarding.allScores.ocd || 0,
                     onboarding.allScores.ptsd || 0,
                     onboarding.highestScore,
-                    onboarding.recommendedTests.join(','), // بنحوله لـ String مفصول بكومة ليتخزن في VARCHAR
+                    onboarding.recommendedTests.join(','),
                     onboarding.hasTie ? 1 : 0
                 ];
 
                 db.execute(testSql, testValues, (testErr) => {
                     if (testErr) {
-                        console.error("❌ فشل حفظ الـ recommended tests:", testErr.message);
-                        // مش هنوقف التسجيل الأساسي، هنكمل عادي عشان اليوزر ميتعطلش، بس هنطبع الـ Error للـ Debugging
+                        console.error("❌ Failed to save recommended tests:", testErr.message);
                     } else {
-                        console.log("✅ تم حفظ الـ recommended tests بنجاح لليوزر:", newUserId);
+                        console.log("✅ Recommended tests saved successfully for user:", newUserId);
                     }
-                    // كمل الـ Flow وابعت الميل
                     sendVerificationEmailAndRespond();
                 });
             } else {
-                // لو عمل Skip أو الداتا مجتش، ابعت الميل فوراً وكأن شيئاً لم يكن
-                console.log("ℹ️ لم يتم إرسال بيانات onboarding، تم تخطي الحفظ.");
+                console.log("ℹ️ No onboarding data received, skipping save.");
                 sendVerificationEmailAndRespond();
             }
         });
     } catch (error) {
         res.status(500).json({
             status: "failed",
-            message: "خطأ داخلي في السيرفر"
+            message: "Internal server error"
         });
     }
 });
 
-// --- 2. تفعيل الحساب (Verify OTP) ---
+// --- 2. Verify OTP ---
 app.post('/verify', (req, res) => {
     const { Email, code } = req.body;
 
-    // 1. التحقق من وجود المدخلات الأساسية
     if (!Email || !code) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال البريد الإلكتروني وكود التفعيل"
+            message: "Please enter your email and verification code"
         });
     }
 
@@ -267,11 +252,10 @@ app.post('/verify', (req, res) => {
             });
         }
 
-        // 2. إذا لم يطابق الكود أو الإيميل
         if (results.length === 0) {
             return res.status(400).json({
                 status: "failed",
-                message: "الكود غير صحيح أو منتهي الصلاحية"
+                message: "Invalid or expired verification code"
             });
         }
 
@@ -284,24 +268,22 @@ app.post('/verify', (req, res) => {
                 });
             }
 
-            // 3. إرسال استجابة النجاح بنجاح
             res.status(200).json({
                 status: "success",
-                message: "تم تفعيل الحساب بنجاح!"
+                message: "Account verified successfully!"
             });
         });
     });
 });
 
-// --- 3. تسجيل الدخول (Login) ---
+// --- 3. Login ---
 app.post('/login', (req, res) => {
     const { Email, password } = req.body;
 
-    // 1. التحقق من المدخلات الأساسية أولاً
     if (!Email || !password) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال البريد الإلكتروني وكلمة المرور"
+            message: "Please enter your email and password"
         });
     }
 
@@ -314,37 +296,32 @@ app.post('/login', (req, res) => {
             });
         }
 
-        // 2. إذا لم يتم العثور على المستخدم
         if (results.length === 0) {
             return res.status(404).json({
                 status: "failed",
-                message: "المستخدم غير موجود"
+                message: "User not found"
             });
         }
 
         const user = results[0];
 
-        // 3. التحقق مما إذا كان الحساب مفعلاً أم لا
         if (user.is_verified === 0) {
             return res.status(403).json({
                 status: "failed",
-                message: "برجاء تفعيل الحساب أولاً"
+                message: "Please verify your account first"
             });
         }
 
-        // 4. مقارنة كلمة المرور
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({
                 status: "failed",
-                message: "كلمة السر خطأ"
+                message: "Incorrect password"
             });
         }
 
-        // 5. إنشاء الـ Token
         const token = jwt.sign({ id: user.UserID }, 'secret_key');
 
-        // 6. استعلام لجلب إحصائيات الاختبارات مع النسبة المئوية لآخر سكور
         const statsSql = `
             SELECT 
                 COUNT(tr.TestResultID) AS totalTests,
@@ -371,7 +348,7 @@ app.post('/login', (req, res) => {
             if (statsErr) {
                 return res.status(500).json({
                     status: "failed",
-                    message: "خطأ أثناء جلب إحصائيات الاختبارات: " + statsErr.message
+                    message: "Error fetching test statistics: " + statsErr.message
                 });
             }
 
@@ -380,16 +357,14 @@ app.post('/login', (req, res) => {
             const lastScore = stats ? stats.lastScore : null;
             const lastMaxScore = stats ? stats.lastMaxScore : null;
 
-            // حساب النسبة المئوية بنفس معادلة الفرونت
             let lastScorePercentage = null;
             if (lastScore !== null && lastMaxScore !== null && lastMaxScore > 0) {
                 lastScorePercentage = Math.round((lastScore / lastMaxScore) * 100);
             }
 
-            // 7. إرسال استجابة النجاح
             res.status(200).json({
                 status: "success",
-                message: "تم تسجيل الدخول بنجاح",
+                message: "Logged in successfully",
                 token: token,
                 user: {
                     id: user.UserID,
@@ -405,21 +380,19 @@ app.post('/login', (req, res) => {
     });
 });
 
-// --- عرض قائمة الأطباء ---
+// --- Get Doctors List ---
 app.get('/doctors', (req, res) => {
     const sql = "SELECT * FROM doctors ORDER BY CreatedAt DESC";
 
     db.execute(sql, (err, results) => {
         if (err) {
-            console.error("❌ خطأ في جلب بيانات الأطباء:", err.message);
-            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
+            console.error("❌ Error fetching doctors:", err.message);
             return res.status(500).json({
                 status: "failed",
-                message: "خطأ في السيرفر عند جلب البيانات"
+                message: "Server error while fetching data"
             });
         }
 
-        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
             status: "success",
             success: true,
@@ -429,29 +402,26 @@ app.get('/doctors', (req, res) => {
     });
 });
 
-// --- عرض طبيب واحد ---
+// --- Get Single Doctor ---
 app.get('/doctors/:id', (req, res) => {
     const doctorId = req.params.id;
     const sql = "SELECT * FROM doctors WHERE DoctorID = ?";
 
     db.execute(sql, [doctorId], (err, results) => {
         if (err) {
-            // إضافة حقل status: "failed" في حالة خطأ السيرفر
             return res.status(500).json({
                 status: "failed",
                 message: err.message
             });
         }
 
-        // إذا لم يتم العثور على الطبيب بالـ ID الممرر
         if (results.length === 0) {
             return res.status(404).json({
                 status: "failed",
-                message: "الطبيب غير موجود"
+                message: "Doctor not found"
             });
         }
 
-        // استجابة النجاح وتمرير البيانات داخل كائن موحد
         res.status(200).json({
             status: "success",
             data: results[0]
@@ -459,16 +429,15 @@ app.get('/doctors/:id', (req, res) => {
     });
 });
 
-// --- إضافة نتيجة اختبار ---
+// --- Add Test Result ---
 app.post('/test-results', authenticateToken, (req, res) => {
     const { TestTypeID, ResultValue } = req.body;
-    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
+    const UserID = req.user.id;
 
-    // 1. تأكيد وجود المدخلات الأساسية
     if (!TestTypeID || ResultValue === undefined) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال نوع الاختبار والنتيجة"
+            message: "Please provide the test type and result"
         });
     }
 
@@ -476,26 +445,23 @@ app.post('/test-results', authenticateToken, (req, res) => {
 
     db.execute(sql, [UserID, TestTypeID, ResultValue], (err, result) => {
         if (err) {
-            // 2. تحويل الخطأ إلى JSON مع إضافة حقل الـ status لتوحيد الاستجابة
             return res.status(500).json({
                 status: "failed",
                 message: err.message
             });
         }
 
-        // 3. استجابة النجاح الموحدة
         res.status(201).json({
             status: "success",
-            message: "تم إضافة نتيجة الاختبار بنجاح"
+            message: "Test result added successfully"
         });
     });
 });
 
-// --- عرض نتائج الاختبارات ---
+// --- Get Test Results ---
 app.get('/test-results', authenticateToken, (req, res) => {
-    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
+    const UserID = req.user.id;
 
-    // استخدمنا JOIN لربط الجدولين عن طريق TestTypeID
     const sql = `
     SELECT 
         tr.TestResultID, 
@@ -510,15 +476,13 @@ app.get('/test-results', authenticateToken, (req, res) => {
 
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
-            console.error("❌ خطأ في الاستعلام:", err.message);
-            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
+            console.error("❌ Query error:", err.message);
             return res.status(500).json({
                 status: "failed",
-                message: "خطأ في جلب البيانات من قاعدة البيانات"
+                message: "Error fetching data from the database"
             });
         }
 
-        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
             status: "success",
             success: true,
@@ -528,22 +492,20 @@ app.get('/test-results', authenticateToken, (req, res) => {
     });
 });
 
-// --- الشات مع Groq AI ---
+// --- Chat with Groq AI ---
 app.post('/chat', authenticateToken, async (req, res) => {
     try {
         const { message } = req.body;
         const UserID = req.user.id;
 
-        // 1. تعديل الاستجابة هنا لتكون JSON لحماية الفرونتيند وإضافة status: "failed"
         if (!message || message.trim() === "") {
             return res.status(400).json({
                 status: "failed",
                 success: false,
-                reply: "الرسالة فارغة، يرجى كتابة شيء ما."
+                reply: "Message is empty, please write something."
             });
         }
 
-        // تم تنظيف السطر الأخير لتجنب تكرار رسالة المستخدم داخل الـ System Prompt
         const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
 
 Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
@@ -617,27 +579,23 @@ When appropriate, suggest:
 7. Final Objective:
 - Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.`;
 
-        // إرسال الطلب لـ Groq بشكل منظم وصحيح
         const result = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: message } // رسالة المستخدم تمرر هنا فقط بشكل نقي
+                { role: "user", content: message }
             ],
             max_tokens: 1024
         });
 
         const aiText = result.choices[0].message.content;
 
-        // حفظ المحادثة في الداتابيز
         const sql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
         db.execute(sql, [UserID, message, aiText], (err) => {
             if (err) {
-                console.error("❌ خطأ في حفظ الرسالة في الداتابيز:", err.message);
-                // لا نوقف العملية حتى لو فشل الحفظ، نرسل الرد للمستخدم على أي حال
+                console.error("❌ Error saving message to database:", err.message);
             }
 
-            // استجابة النجاح الموحدة
             res.status(200).json({
                 status: "success",
                 success: true,
@@ -648,37 +606,33 @@ When appropriate, suggest:
     } catch (error) {
         console.error("Groq Error:", error);
 
-        // خطأ الـ Rate Limit تخطي الحد المسموح
         if (error.status === 429) {
             return res.status(503).json({
                 status: "failed",
                 success: false,
-                reply: "الخدمة مشغولة حالياً، برجاء المحاولة بعد قليل 🙏"
+                reply: "Service is currently busy, please try again in a moment 🙏"
             });
         }
 
-        // خطأ السيرفر الداخلي
         res.status(500).json({
             status: "failed",
             success: false,
-            reply: "حدث خطأ في التواصل مع الذكاء الاصطناعي"
+            reply: "An error occurred while communicating with the AI"
         });
     }
 });
 
-// --- 4. طلب كود إعادة تعيين كلمة المرور (Forgot Password) ---
+// --- 4. Forgot Password ---
 app.post('/forgot-password', (req, res) => {
     const { Email } = req.body;
 
-    // 1. التحقق من وجود الإيميل في الطلب
     if (!Email) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال البريد الإلكتروني"
+            message: "Please enter your email address"
         });
     }
 
-    // 2. التأكد أولاً أن الإيميل مسجل في الحسابات الفعالة
     const sqlCheck = "SELECT * FROM users WHERE Email = ? AND is_verified = 1";
     db.execute(sqlCheck, [Email], (err, results) => {
         if (err) {
@@ -690,14 +644,12 @@ app.post('/forgot-password', (req, res) => {
         if (results.length === 0) {
             return res.status(404).json({
                 status: "failed",
-                message: "هذا البريد الإلكتروني غير مسجل أو غير مفعل"
+                message: "This email is not registered or not verified"
             });
         }
 
-        // 3. توليد كود الـ OTP
         const resetOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // 4. حفظ أو تحديث الكود في الجدول المنفصل (password_resets)
         const sqlInsertReset = "REPLACE INTO password_resets (Email, token_code) VALUES (?, ?)";
         db.execute(sqlInsertReset, [Email, resetOtpCode], (upErr) => {
             if (upErr) {
@@ -707,18 +659,17 @@ app.post('/forgot-password', (req, res) => {
                 });
             }
 
-            // 5. إرسال الإيميل
             const mailOptions = {
                 from: '"Mental Health Support" <mental.health.auth@gmail.com>',
                 to: Email,
-                subject: 'إعادة تعيين كلمة المرور - OTP',
+                subject: 'Password Reset - OTP',
                 html: `
                     <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; background-color: #ffffff;">
                         <div style="background-color: #fef2f2; padding: 35px 20px; text-align: center;">
-                            <h1 style="color: #dc2626; margin: 0;">إعادة تعيين كلمة المرور</h1>
+                            <h1 style="color: #dc2626; margin: 0;">Password Reset</h1>
                         </div>
                         <div style="padding: 45px 35px; text-align: center;">
-                            <p style="color: #475569; font-size: 16px;">كود التحقق الخاص بك (صالح لمدة 10 دقائق):</p>
+                            <p style="color: #475569; font-size: 16px;">Your verification code (valid for 10 minutes):</p>
                             <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 25px; display: inline-block; min-width: 200px; margin-bottom: 20px;">
                                 <span style="font-size: 40px; font-weight: bold; color: #dc2626; letter-spacing: 10px; font-family: monospace;">${resetOtpCode}</span>
                             </div>
@@ -730,15 +681,14 @@ app.post('/forgot-password', (req, res) => {
                 if (mailErr) {
                     return res.status(500).json({
                         status: "failed",
-                        message: "فشل في إرسال الإيميل، يرجى المحاولة لاحقاً"
+                        message: "Failed to send email, please try again later"
                     });
                 }
 
-                // 6. استجابة النجاح الموحدة
                 res.status(200).json({
                     status: "success",
                     success: true,
-                    message: "تم إرسال كود إعادة التعيين بنجاح.",
+                    message: "Reset code sent successfully.",
                     debug_otp: resetOtpCode
                 });
             });
@@ -746,19 +696,17 @@ app.post('/forgot-password', (req, res) => {
     });
 });
 
-// --- 5. الخطوة الثانية: التأكد من الكود والوقت (Verify Reset Code) ---
+// --- 5. Verify Reset Code ---
 app.post('/verify-reset-code', (req, res) => {
     const { Email, code } = req.body;
 
-    // 1. التحقق من وجود المدخلات الأساسية
     if (!Email || !code) {
         return res.status(400).json({
             status: "failed",
-            message: "برجاء إدخال الإيميل والكود"
+            message: "Please enter your email and the code"
         });
     }
 
-    // جلب بيانات الكود من الجدول المنفصل
     const sql = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ?";
     db.execute(sql, [Email], (err, results) => {
         if (err) {
@@ -770,31 +718,27 @@ app.post('/verify-reset-code', (req, res) => {
         if (results.length === 0) {
             return res.status(400).json({
                 status: "failed",
-                message: "لم يتم طلب كود لهذا الإيميل أو انتهت صلاحيته"
+                message: "No reset code was requested for this email or it has expired"
             });
         }
 
         const record = results[0];
 
-        // 2. التشييك على الوقت (لو عدى أكتر من 10 دقائق) وتحويل الرد إلى JSON
         if (record.minutes_passed > 10) {
-            // نحذفه من جدول الريسيت عشان ننظف أول بأول
             db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
             return res.status(400).json({
                 status: "failed",
-                message: "انتهت صلاحية هذا الكود (تعدى 10 دقائق)، يرجى طلب كود جديد"
+                message: "This code has expired (10 minutes passed), please request a new one"
             });
         }
 
-        // 3. التشييك على صحة الكود وتحويل الرد إلى JSON
         if (record.token_code !== code) {
             return res.status(400).json({
                 status: "failed",
-                message: "الكود غير صحيح"
+                message: "Incorrect code"
             });
         }
 
-        // 4. الكود صح وضمن الـ 10 دقائق ➔ نقوم بتحديث الكود لكلمة 'VERIFIED' كإثبات للخطوة الثالثة
         db.execute("UPDATE password_resets SET token_code = 'VERIFIED' WHERE Email = ?", [Email], (verErr) => {
             if (verErr) {
                 return res.status(500).json({
@@ -803,38 +747,34 @@ app.post('/verify-reset-code', (req, res) => {
                 });
             }
 
-            // استجابة النجاح الموحدة
             res.status(200).json({
                 status: "success",
                 success: true,
-                message: "تم التحقق من الكود بنجاح. يمكنك الآن تعيين الباسورد الجديد."
+                message: "Code verified successfully. You can now set a new password."
             });
         });
     });
 });
 
-// --- 6. الخطوة الثالثة والأخيرة: تغيير الباسورد وحذف السجل (تعديل لـ PUT) ---
+// --- 6. Reset Password ---
 app.put('/reset-password', async (req, res) => {
     const { Email, password } = req.body;
 
-    // 1. التحقق من اكتمال البيانات المطلوبة
     if (!Email || !password) {
         return res.status(400).json({
             status: "failed",
-            message: "البيانات المطلوبة غير مكتملة"
+            message: "Required data is incomplete"
         });
     }
 
-    // 2. التحقق من قوة الباسورد الجديد (مطابقة للـ Regex المحدّث سابقاً شامل الرموز إذا كنت تفضل توحيدها)
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).json({
             status: "failed",
-            message: "كلمة السر ضعيفة (8 حروف، حرف كبير، حرف صغير، رقم)"
+            message: "Weak password (min 8 characters, uppercase, lowercase, number)"
         });
     }
 
-    // 🔍 التشييك أولاً في جدول المستخدمين الرئيسي للتأكد من وجود الإيميل
     const sqlCheckUser = "SELECT * FROM users WHERE Email = ?";
     db.execute(sqlCheckUser, [Email], (userErr, userResults) => {
         if (userErr) {
@@ -844,15 +784,13 @@ app.put('/reset-password', async (req, res) => {
             });
         }
 
-        // لو الإيميل مش موجود في الداتابيز أصلاً
         if (userResults.length === 0) {
             return res.status(404).json({
                 status: "failed",
-                message: "هذا البريد الإلكتروني غير مسجل لدينا، برجاء إنشاء حساب أولاً"
+                message: "This email is not registered, please create an account first"
             });
         }
 
-        // لو الحساب موجود، نبدأ نشيك على حالة التفعيل والوقت في جدول password_resets
         const sqlCheckReset = "SELECT *, TIMESTAMPDIFF(MINUTE, CreatedAt, NOW()) AS minutes_passed FROM password_resets WHERE Email = ? AND token_code = 'VERIFIED'";
         db.execute(sqlCheckReset, [Email], async (resetErr, resetResults) => {
             if (resetErr) {
@@ -862,21 +800,17 @@ app.put('/reset-password', async (req, res) => {
                 });
             }
 
-            // لو الإيميل موجود بس مأكدش الكود في الخطوة التانية، أو الوقت (10 دقائق) انتهى
             if (resetResults.length === 0 || resetResults[0].minutes_passed > 10) {
-                // تنظيف الجدول وحذف السجل المنتهي
                 db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
                 return res.status(403).json({
                     status: "failed",
-                    message: "طلب غير مصرح به أو انتهت صلاحية الـ 10 دقائق، يرجى إعادة المحاولة من الخطوة الأولى"
+                    message: "Unauthorized request or the 10-minute window has expired, please start over"
                 });
             }
 
             try {
-                // تشفير الباسورد الجديد
                 const hashedPassword = await bcrypt.hash(password, 10);
 
-                // تحديث الباسورد في جدول الـ users
                 const sqlUpdateUser = "UPDATE users SET password = ? WHERE Email = ?";
                 db.execute(sqlUpdateUser, [hashedPassword, Email], (upErr) => {
                     if (upErr) {
@@ -886,54 +820,48 @@ app.put('/reset-password', async (req, res) => {
                         });
                     }
 
-                    // حذف السجل المؤقت من جدول الـ password_resets بعد النجاح
                     db.execute("DELETE FROM password_resets WHERE Email = ?", [Email]);
 
-                    // استجابة النجاح الموحدة
                     res.status(200).json({
                         status: "success",
                         success: true,
-                        message: "تم تغيير كلمة المرور بنجاح! يمكنك تسجيل الدخول الآن."
+                        message: "Password changed successfully! You can now log in."
                     });
                 });
             } catch (error) {
                 res.status(500).json({
                     status: "failed",
-                    message: "خطأ في السيرفر أثناء تشفير كلمة المرور"
+                    message: "Server error while encrypting the password"
                 });
             }
         });
     });
 });
 
-// --- جلب تاريخ الشات للمستخدم الحالي ---
+// --- Get Chat History ---
 app.get('/chat/history', authenticateToken, (req, res) => {
-    const UserID = req.user.id; // بناخده من التوكن لضمان الأمان
+    const UserID = req.user.id;
 
     const sql = "SELECT UserMessage, AiResponse, CreatedAt FROM chatMessages WHERE UserID = ? ORDER BY CreatedAt ASC";
 
     db.execute(sql, [UserID], (err, results) => {
         if (err) {
-            console.error("❌ خطأ في جلب تاريخ الشات:", err.message);
-            // إضافة حقل status: "failed" وتوحيد نمط الاستجابة للأخطاء
+            console.error("❌ Error fetching chat history:", err.message);
             return res.status(500).json({
                 status: "failed",
-                message: "فشل في تحميل المحادثات القديمة"
+                message: "Failed to load previous conversations"
             });
         }
 
-        // استجابة النجاح بعد إضافة حقل status: "success"
         res.status(200).json({
             status: "success",
             success: true,
-            history: results // مصفوفة (Array) تحتوي على الرسائل السابقة مرتبة زمنياً تصاعدياً
+            history: results
         });
     });
 });
 
-
-// مبروك مقدماً على التقفيل.. ده الـ Endpoint المطور بالكامل:
-
+// --- Get Tests List ---
 app.get('/tests', (req, res) => {
     const authHeader = req.headers.authorization;
     let userId = null;
@@ -989,11 +917,11 @@ app.get('/tests', (req, res) => {
 
     db.execute(sql, queryParams, (err, results) => {
         if (err) {
-            console.error("❌ خطأ أثناء جلب الاختبارات:", err.message);
+            console.error("❌ Error fetching tests:", err.message);
             return res.status(500).json({
                 status: "failed",
                 success: false,
-                message: "خطأ في السيرفر عند جلب البيانات"
+                message: "Server error while fetching data"
             });
         }
 
@@ -1011,62 +939,55 @@ app.get('/tests', (req, res) => {
     });
 });
 
-// --- 2. جلب معلومات اختبار معين والأسئلة الخاصة به عن طريق الـ ID ---
+// --- Get Single Test ---
 app.get('/tests/:testId', (req, res) => {
     const testId = req.params.testId;
 
-    // 1. التأكد إن الـ ID مبعوث وهو عبارة عن رقم
     if (!testId || isNaN(testId)) {
         return res.status(400).json({
             status: "failed",
             success: false,
-            message: "معرف الاختبار غير صحيح أو غير موجود"
+            message: "Invalid or missing test ID"
         });
     }
 
-    // 1️⃣ الاستعلام الأول: جلب بيانات الاختبار نفسه
     const testSql = "SELECT TestTypeID, TestName, Description, NormalRange, TotalQuestions FROM testtypes WHERE TestTypeID = ?";
 
     db.execute(testSql, [testId], (testErr, testResults) => {
         if (testErr) {
-            console.error(`❌ خطأ أثناء جلب بيانات الاختبار رقم ${testId}:`, testErr.message);
+            console.error(`❌ Error fetching test #${testId}:`, testErr.message);
             return res.status(500).json({
                 status: "failed",
                 success: false,
-                message: "حدث خطأ في السيرفر أثناء جلب بيانات الاختبار"
+                message: "Server error while fetching test data"
             });
         }
 
-        // 2. لو الـ ID مش موجود في جدول الاختبارات أصلاً
         if (testResults.length === 0) {
             return res.status(404).json({
                 status: "failed",
                 success: false,
-                message: "هذا الاختبار غير موجود"
+                message: "This test does not exist"
             });
         }
 
-        // حفظ بيانات الاختبار في أوبجكت لوحده
         const testInfo = testResults[0];
 
-        // 2️⃣ الاستعلام الثاني: جلب الأسئلة المربوطة بالاختبار ده
         const questionsSql = "SELECT QuestionID, QuestionText FROM questions WHERE TestTypeID = ? ORDER BY QuestionID ASC";
 
         db.execute(questionsSql, [testId], (qErr, qResults) => {
             if (qErr) {
-                console.error(`❌ خطأ أثناء جلب أسئلة الاختبار رقم ${testId}:`, qErr.message);
+                console.error(`❌ Error fetching questions for test #${testId}:`, qErr.message);
                 return res.status(500).json({
                     status: "failed",
                     success: false,
-                    message: "حدث خطأ في السيرفر أثناء جلب أسئلة الاختبار"
+                    message: "Server error while fetching test questions"
                 });
             }
 
-            // 3. إرسال الـ Response بالتقسيمة المطلوبة مضافاً إليها حقل الـ status بنجاح
             res.status(200).json({
                 status: "success",
                 success: true,
-                // أوبجكت يحتوي على معلومات الاختبار بالكامل
                 test_details: {
                     id: testInfo.TestTypeID,
                     name: testInfo.TestName,
@@ -1074,7 +995,6 @@ app.get('/tests/:testId', (req, res) => {
                     normal_range: testInfo.NormalRange,
                     total_questions_expected: testInfo.TotalQuestions
                 },
-                // أوبجكت يحتوي على مصفوفة الأسئلة
                 questions_data: {
                     total_questions_found: qResults.length,
                     questions: qResults
@@ -1086,5 +1006,4 @@ app.get('/tests/:testId', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-// ... نهاية الكود بتاعك
 module.exports = app;
