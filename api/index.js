@@ -492,7 +492,6 @@ app.get('/test-results', authenticateToken, (req, res) => {
     });
 });
 
-// --- Chat with Groq AI ---
 app.post('/chat', authenticateToken, async (req, res) => {
     try {
         const { message } = req.body;
@@ -579,45 +578,76 @@ When appropriate, suggest:
 7. Final Objective:
 - Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.`;
 
-        const result = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: message }
-            ],
-            max_tokens: 1024
-        });
+        // 🆕 هات آخر 3 محادثات (يعني 6 رسائل: يوزر + AI)
+        const HISTORY_LIMIT = 6;
+        const historySql = `
+            SELECT UserMessage, AiResponse 
+            FROM chatMessages 
+            WHERE UserID = ? 
+            ORDER BY MessageID DESC 
+            LIMIT ?
+        `;
 
-        const aiText = result.choices[0].message.content;
-
-        const sql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
-        db.execute(sql, [UserID, message, aiText], (err) => {
+        db.execute(historySql, [UserID, HISTORY_LIMIT], async (err, rows) => {
             if (err) {
-                console.error("❌ Error saving message to database:", err.message);
+                console.error("❌ Error fetching chat history:", err.message);
             }
 
-            res.status(200).json({
-                status: "success",
-                success: true,
-                reply: aiText
-            });
+            // نرتبهم من الأقدم للأحدث ونحولهم لصيغة messages
+            const history = (rows || []).reverse().flatMap(row => ([
+                { role: "user", content: row.UserMessage },
+                { role: "assistant", content: row.AiResponse }
+            ]));
+
+            const messages = [
+                { role: "system", content: systemPrompt },
+                ...history,
+                { role: "user", content: message }
+            ];
+
+            try {
+                const result = await groq.chat.completions.create({
+                    model: "llama-3.3-70b-versatile",
+                    messages,
+                    max_tokens: 1024,
+                    temperature: 0.6
+                });
+
+                const aiText = result.choices[0].message.content;
+
+                const insertSql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
+                db.execute(insertSql, [UserID, message, aiText], (err) => {
+                    if (err) console.error("❌ Error saving message:", err.message);
+
+                    res.status(200).json({
+                        status: "success",
+                        success: true,
+                        reply: aiText
+                    });
+                });
+            } catch (groqError) {
+                console.error("Groq Error:", groqError);
+                if (groqError.status === 429) {
+                    return res.status(503).json({
+                        status: "failed",
+                        success: false,
+                        reply: "Service is currently busy, please try again in a moment 🙏"
+                    });
+                }
+                res.status(500).json({
+                    status: "failed",
+                    success: false,
+                    reply: "An error occurred while communicating with the AI"
+                });
+            }
         });
 
     } catch (error) {
-        console.error("Groq Error:", error);
-
-        if (error.status === 429) {
-            return res.status(503).json({
-                status: "failed",
-                success: false,
-                reply: "Service is currently busy, please try again in a moment 🙏"
-            });
-        }
-
+        console.error("General Error:", error);
         res.status(500).json({
             status: "failed",
             success: false,
-            reply: "An error occurred while communicating with the AI"
+            reply: "An error occurred"
         });
     }
 });
