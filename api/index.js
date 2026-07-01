@@ -505,7 +505,44 @@ app.post('/chat', authenticateToken, async (req, res) => {
             });
         }
 
-        const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
+        // حماية بسيطة من رسايل طويلة أوي (تكلفة + إساءة استخدام)
+        if (message.length > 1500) {
+            return res.status(400).json({
+                status: "failed",
+                success: false,
+                reply: "الرسالة طويلة أوي، ممكن تختصرها؟"
+            });
+        }
+
+        // 🆕 كشف كلمات أزمة قبل ما نبعت للـ AI أصلاً - طبقة أمان إضافية
+        const crisisKeywords = ["انتحار", "اموت", "أموت", "أأذي نفسي", "اذي نفسي", "مش عايز أعيش", "مش عايز اعيش"];
+        const isCrisis = crisisKeywords.some(word => message.includes(word));
+
+        // هات آخر 8 محادثات كاملة (يوزر + AI) = 16 رسالة سياق
+        const HISTORY_LIMIT = 8;
+        const historySql = `
+            SELECT UserMessage, AiResponse 
+            FROM chatMessages 
+            WHERE UserID = ? 
+            ORDER BY MessageID DESC 
+            LIMIT ?
+        `;
+
+        db.execute(historySql, [UserID, HISTORY_LIMIT], async (err, rows) => {
+            if (err) {
+                console.error("❌ Error fetching chat history:", err.message);
+            }
+
+            // رتبهم من الأقدم للأحدث
+            const orderedHistory = (rows || []).reverse();
+
+            // 🆕 نبني ملخص بسيط للمحادثة عشان الموديل "يعرف" هو في إيه، مش بس يشوف رسايل مقطوعة
+            const isFirstMessage = orderedHistory.length === 0;
+            const conversationContext = isFirstMessage
+                ? "هذه هي أول رسالة من المستخدم في هذه المحادثة."
+                : `هذه محادثة مستمرة مع نفس المستخدم. عدد الرسائل السابقة: ${orderedHistory.length}. تذكر ما قيل سابقاً ولا تكرر نفس الأسئلة أو الردود، وابنِ على السياق الموجود بدل ما تبدأ من الصفر.`;
+
+            const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
 
 Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
 
@@ -515,6 +552,16 @@ You support users experiencing symptoms related to:
 - OCD (Obsessive Compulsive Disorder)
 - ADHD
 - PTSD
+
+---
+
+CONVERSATION AWARENESS (VERY IMPORTANT):
+${conversationContext}
+- You are NOT meeting this user for the first time each message. Read the conversation history provided and respond as a continuation of it.
+- If the user already shared something (a feeling, an event, a name), refer back to it naturally instead of asking again.
+- If the user's message is short or vague (e.g. "ايه؟", "ليه؟", "مش فاهم"), interpret it in light of the previous exchange, not as a standalone message.
+- Avoid repeating the same opening phrases or generic greetings if this is not the first message.
+- Track emotional progression: if the user seems to be improving, acknowledge that. If they seem to be escalating, adjust your tone accordingly.
 
 ---
 
@@ -538,6 +585,7 @@ Examples:
 - If user mentions distraction, lack of focus → suggest ADHD test
 - If user mentions intrusive thoughts or repetitive behaviors → suggest OCD test
 - If user mentions trauma or flashbacks → suggest PTSD test
+- Do NOT suggest the same test again if it was already suggested recently in this conversation, unless the user brings it up again.
 
 3. No Diagnosis Rule:
 - Never say:
@@ -576,32 +624,16 @@ When appropriate, suggest:
 ---
 
 7. Final Objective:
-- Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app.`;
+- Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app, while treating this as one continuous relationship, not isolated messages.`;
 
-        // 🆕 هات آخر 3 محادثات (يعني 6 رسائل: يوزر + AI)
-        const HISTORY_LIMIT = 6;
-        const historySql = `
-            SELECT UserMessage, AiResponse 
-            FROM chatMessages 
-            WHERE UserID = ? 
-            ORDER BY MessageID DESC 
-            LIMIT ?
-        `;
-
-        db.execute(historySql, [UserID, HISTORY_LIMIT], async (err, rows) => {
-            if (err) {
-                console.error("❌ Error fetching chat history:", err.message);
-            }
-
-            // نرتبهم من الأقدم للأحدث ونحولهم لصيغة messages
-            const history = (rows || []).reverse().flatMap(row => ([
+            const historyMessages = orderedHistory.flatMap(row => ([
                 { role: "user", content: row.UserMessage },
                 { role: "assistant", content: row.AiResponse }
             ]));
 
             const messages = [
                 { role: "system", content: systemPrompt },
-                ...history,
+                ...historyMessages,
                 { role: "user", content: message }
             ];
 
@@ -613,7 +645,12 @@ When appropriate, suggest:
                     temperature: 0.6
                 });
 
-                const aiText = result.choices[0].message.content;
+                let aiText = result.choices[0].message.content;
+
+                // 🆕 لو الرسالة فيها إشارة أزمة، نضمن إن في رقم/توجيه واضح حتى لو الموديل نسي
+                if (isCrisis && !aiText.includes("١٠٨") && !aiText.includes("تتواصل")) {
+                    aiText += "\n\nلو حاسس إنك مش قادر تتحمل، ياريت تتواصل مع حد قريب منك دلوقتي أو بخط المساعدة النفسية. إنت مش لوحدك في ده.";
+                }
 
                 const insertSql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
                 db.execute(insertSql, [UserID, message, aiText], (err) => {
