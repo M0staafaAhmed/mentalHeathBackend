@@ -368,7 +368,11 @@ app.post('/login', (req, res) => {
                 token: token,
                 user: {
                     id: user.UserID,
-                    name: user.FullName
+                    name: user.FullName,
+                    email: user.Email,
+                    phone: user.Phone,
+                    gender: user.Gender,
+                    dateOfBirth: user.DateOfBirth
                 },
                 stats: {
                     totalTests: totalTests,
