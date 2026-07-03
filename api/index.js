@@ -772,7 +772,7 @@ app.put('/reset-password', async (req, res) => {
         });
     }
 
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d]{8,}$/;
+    const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).json({
             status: "failed",
