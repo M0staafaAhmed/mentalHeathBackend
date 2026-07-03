@@ -501,6 +501,7 @@ app.post('/chat', authenticateToken, async (req, res) => {
         const { message } = req.body;
         const UserID = req.user.id;
 
+        // 1. التحقق من أن الرسالة ليست فارغة
         if (!message || message.trim() === "") {
             return res.status(400).json({
                 status: "failed",
@@ -509,20 +510,20 @@ app.post('/chat', authenticateToken, async (req, res) => {
             });
         }
 
-        // حماية بسيطة من رسايل طويلة أوي (تكلفة + إساءة استخدام)
+        // 2. حماية من الرسائل الطويلة جداً لتوفير التكلفة ومنع إساءة الاستخدام
         if (message.length > 1500) {
             return res.status(400).json({
                 status: "failed",
                 success: false,
-                reply: "الرسالة طويلة أوي، ممكن تختصرها؟"
+                reply: "Your message is too long. Please keep it under 1500 characters."
             });
         }
 
-        // 🆕 كشف كلمات أزمة قبل ما نبعت للـ AI أصلاً - طبقة أمان إضافية
+        // 3. نظام كشف كلمات الأزمات الطارئة (طبقة أمان أولى)
         const crisisKeywords = ["انتحار", "اموت", "أموت", "أأذي نفسي", "اذي نفسي", "مش عايز أعيش", "مش عايز اعيش"];
         const isCrisis = crisisKeywords.some(word => message.includes(word));
 
-        // هات آخر 8 محادثات كاملة (يوزر + AI) = 16 رسالة سياق
+        // 4. جلب آخر 8 محادثات كاملة (يوزر + AI) من قاعدة البيانات للحفاظ على السياق
         const HISTORY_LIMIT = 8;
         const historySql = `
             SELECT UserMessage, AiResponse 
@@ -537,129 +538,61 @@ app.post('/chat', authenticateToken, async (req, res) => {
                 console.error("❌ Error fetching chat history:", err.message);
             }
 
-            // رتبهم من الأقدم للأحدث
+            // ترتيب الرسائل من الأقدم إلى الأحدث ليقرأها الموديل بشكل صحيح
             const orderedHistory = (rows || []).reverse();
 
-            // 🆕 نبني ملخص بسيط للمحادثة عشان الموديل "يعرف" هو في إيه، مش بس يشوف رسايل مقطوعة
-            const isFirstMessage = orderedHistory.length === 0;
-            const conversationContext = isFirstMessage
-                ? "هذه هي أول رسالة من المستخدم في هذه المحادثة."
-                : `هذه محادثة مستمرة مع نفس المستخدم. عدد الرسائل السابقة: ${orderedHistory.length}. تذكر ما قيل سابقاً ولا تكرر نفس الأسئلة أو الردود، وابنِ على السياق الموجود بدل ما تبدأ من الصفر.`;
-
+            // 5. الـ System Prompt الثابت والمحسن لتوجيه الموديل بدقة
             const systemPrompt = `You are an advanced AI mental health support assistant integrated into a mobile application.
-
 Your role is to provide emotional support, identify possible emotional patterns, and guide users toward self-assessment tools available in the app (not medical diagnosis tools).
+You support users experiencing symptoms related to: Depression, Anxiety, OCD, ADHD, PTSD.
 
-You support users experiencing symptoms related to:
-- Depression
-- Anxiety
-- OCD (Obsessive Compulsive Disorder)
-- ADHD
-- PTSD
-
----
-
-CONVERSATION AWARENESS (VERY IMPORTANT):
-${conversationContext}
-- You are NOT meeting this user for the first time each message. Read the conversation history provided and respond as a continuation of it.
+CONVERSATION AWARENESS:
+- You are talking to the user in a continuous conversation. Read the history provided.
 - If the user already shared something (a feeling, an event, a name), refer back to it naturally instead of asking again.
-- If the user's message is short or vague (e.g. "ايه؟", "ليه؟", "مش فاهم"), interpret it in light of the previous exchange, not as a standalone message.
-- Avoid repeating the same opening phrases or generic greetings if this is not the first message.
-- Track emotional progression: if the user seems to be improving, acknowledge that. If they seem to be escalating, adjust your tone accordingly.
-
----
+- If the user's message is short or vague (e.g. "ايه؟", "ليه؟", "مش فاهم"), interpret it strictly in light of the previous exchange.
+- Avoid repeating the same opening phrases, greetings, or suggesting the same test repeatedly.
 
 CORE BEHAVIOR:
+1. Always respond with empathy, warmth, and non-judgment in simple Egyptian Arabic dialect.
+2. Gently suggest relevant self-assessment tests in the app based on their symptoms (sadness -> Depression test, worry -> Anxiety test, distraction -> ADHD test, repetitive behavior -> OCD test). Use soft language.
+3. NEVER diagnose or give scores/percentages. Say "You may be experiencing symptoms similar to..."
+4. Keep responses short, calming, and supportive. Avoid medical jargon.
+5. If the user expresses self-harm or severe distress, prioritize immediate empathy and encourage reaching out to a trusted person or professional help.`;
 
-1. Emotional Support:
-- Always respond with empathy, warmth, and non-judgment.
-- Validate the user's feelings without labeling them as a medical condition.
+            // 6. بناء مصفوفة الرسائل (Messages Array) الموجهة للـ API بشكل منظم
+            const messages = [{ role: "system", content: systemPrompt }];
 
-2. Smart Guidance (VERY IMPORTANT):
-- Based on the user's message, gently suggest the most relevant self-assessment test in the app.
-- Do NOT force or diagnose.
-- Use soft language like:
-- "Based on what you're describing..."
-- "You might benefit from trying..."
-- "It could be helpful to take the..."
+            // دفع التاريخ بترتيب صحيح وسليم (مستخدم ثم مساعد)
+            orderedHistory.forEach(row => {
+                messages.push({ role: "user", content: row.UserMessage });
+                messages.push({ role: "assistant", content: row.AiResponse });
+            });
 
-Examples:
-- If user expresses sadness, hopelessness → suggest Depression test
-- If user expresses excessive worry, panic → suggest Anxiety test
-- If user mentions distraction, lack of focus → suggest ADHD test
-- If user mentions intrusive thoughts or repetitive behaviors → suggest OCD test
-- If user mentions trauma or flashbacks → suggest PTSD test
-- Do NOT suggest the same test again if it was already suggested recently in this conversation, unless the user brings it up again.
-
-3. No Diagnosis Rule:
-- Never say:
-- "You have depression"
-- "You are diagnosed with..."
-- "Any percentages or scores"
-
-Instead say:
-- "You may be experiencing symptoms similar to..."
-- "It could be helpful to explore..."
-
----
-
-4. Output Style:
-- Use simple Arabic (Egyptian dialect preferred)
-- Keep responses short, calming, and supportive
-- Avoid medical jargon
-
----
-
-5. App Integration Goal:
-- Your main goal is to guide users toward the app's self-assessment feature.
-
-When appropriate, suggest:
-- "You can take the Depression self-assessment test in the app to better understand your feelings."
-- "There is an Anxiety check in the app that might help you reflect on what you're feeling."
-
----
-
-6. Crisis Handling:
-- If user expresses self-harm or severe distress:
-- Respond with immediate empathy
-- Encourage reaching out to a trusted person or professional help
-- Do NOT leave user alone with instructions or technical suggestions
-
----
-
-7. Final Objective:
-- Help users feel understood, emotionally supported, and gently guided toward the most relevant self-assessment tool in the app, while treating this as one continuous relationship, not isolated messages.`;
-
-            const historyMessages = orderedHistory.flatMap(row => ([
-                { role: "user", content: row.UserMessage },
-                { role: "assistant", content: row.AiResponse }
-            ]));
-
-            const messages = [
-                { role: "system", content: systemPrompt },
-                ...historyMessages,
-                { role: "user", content: message }
-            ];
+            // دفع الرسالة الحالية الجديدة في نهاية المصفوفة
+            messages.push({ role: "user", content: message });
 
             try {
+                // 7. الاتصال بـ Groq API باستخدام موديل Llama 3.3
                 const result = await groq.chat.completions.create({
                     model: "llama-3.3-70b-versatile",
                     messages,
-                    max_tokens: 1024,
-                    temperature: 0.6
+                    max_tokens: 800, 
+                    temperature: 0.5 // درجة حرارة متزنة تضمن الالتزام بالتعليمات واللهجة دون تخريف
                 });
 
                 let aiText = result.choices[0].message.content;
 
-                // 🆕 لو الرسالة فيها إشارة أزمة، نضمن إن في رقم/توجيه واضح حتى لو الموديل نسي
-                if (isCrisis && !aiText.includes("١٠٨") && !aiText.includes("تتواصل")) {
-                    aiText += "\n\nلو حاسس إنك مش قادر تتحمل، ياريت تتواصل مع حد قريب منك دلوقتي أو بخط المساعدة النفسية. إنت مش لوحدك في ده.";
+                // 8. إذا تم رصد أزمة نفسية خطيرة، يتم إرفاق أرقام الدعم النفسي الرسمية بمصر تلقائياً
+                if (isCrisis && !aiText.includes("تتواصل")) {
+                    aiText += "\n\nلو حاسس إنك مش قادر تتحمل، ياريت تتواصل مع حد قريب منك دلوقتي أو بخط المساعدة النفسية (16463 أو 0220816831 في مصر). إنت مش لوحدك في ده.";
                 }
 
+                // 9. حفظ الرسالة الجديدة والرد الخاص بالـ AI في قاعدة البيانات
                 const insertSql = "INSERT INTO chatMessages (UserID, UserMessage, AiResponse) VALUES (?, ?, ?)";
                 db.execute(insertSql, [UserID, message, aiText], (err) => {
                     if (err) console.error("❌ Error saving message:", err.message);
 
+                    // 10. إرسال الرد النهائي للمستخدم
                     res.status(200).json({
                         status: "success",
                         success: true,
@@ -668,11 +601,12 @@ When appropriate, suggest:
                 });
             } catch (groqError) {
                 console.error("Groq Error:", groqError);
+                // التعامل مع تخطي حدود الاستخدام المتزامن (Rate Limit)
                 if (groqError.status === 429) {
                     return res.status(503).json({
                         status: "failed",
                         success: false,
-                        reply: "Service is currently busy, please try again in a moment 🙏"
+                        reply: "Server is busy, please try again in a few seconds."
                     });
                 }
                 res.status(500).json({
