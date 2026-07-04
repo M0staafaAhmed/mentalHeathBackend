@@ -1009,6 +1009,81 @@ app.get('/tests/:testId', (req, res) => {
     });
 });
 
+// --- Change Password ---
+app.put('/change-password', protect, (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    
+    // 1. التوكن بيفك الـ ID اللي إنت مخزنه في اللوجين (id: user.UserID)
+    const userId = req.user.id; 
+
+    // 2. التأكد إن الحقول مش فاضية
+    if (!oldPassword || !newPassword) {
+        return res.status(400).json({
+            status: "failed",
+            message: "Please enter your old and new password"
+        });
+    }
+
+    // 3. الـ Regex القوي: 8 حروف على الأقل، حرف كبير، حرف صغير، ورقم
+    const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+        return res.status(400).json({
+            status: "failed",
+            message: "New password is too weak! Must be at least 8 characters, with 1 uppercase, 1 lowercase, and 1 number."
+        });
+    }
+
+    // 4. نجيب الباسورد الحالي من الداتا بيز بنفس أسلوب اللوجين بتاعك
+    const sql = "SELECT password FROM users WHERE UserID = ?";
+    db.execute(sql, [userId], async (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                status: "failed",
+                message: err.message
+            });
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({
+                status: "failed",
+                message: "User not found"
+            });
+        }
+
+        const user = results[0];
+
+        // 5. مقارنة الباسورد القديم باللي في الداتا بيز بـ bcrypt.compare زي اللوجين
+        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        if (!isMatch) {
+            return res.status(401).json({
+                status: "failed",
+                message: "Incorrect old password"
+            });
+        }
+
+        // 6. تشفير الباسورد الجديد قبل الحفظ
+        const salt = await bcrypt.genSalt(10);
+        const hashedNewPassword = await bcrypt.hash(newPassword, salt);
+
+        // 7. تحديث الداتا بيز بالباسورد المتشفر الجديد
+        const updateSql = "UPDATE users SET password = ? WHERE UserID = ?";
+        db.execute(updateSql, [hashedNewPassword, userId], (updateErr, updateResults) => {
+            if (updateErr) {
+                return res.status(500).json({
+                    status: "failed",
+                    message: updateErr.message
+                });
+            }
+
+            // كله تمام والعملية نجحت
+            return res.status(200).json({
+                status: "success",
+                message: "Password changed successfully"
+            });
+        });
+    });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 module.exports = app;
