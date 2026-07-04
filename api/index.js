@@ -627,6 +627,64 @@ CORE BEHAVIOR:
     }
 });
 
+
+
+
+
+app.put('/change-password', protect, async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        const userId = req.user.id; // الـ ID جاي متقشر وجاهز من الـ Token
+
+        // 1. التأكد إن الحقول مش فاضية
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ status: 'fail', message: "Please fill in all fields" });
+        }
+
+        // 2. الـ Regex القوي: الباسورد لازم يكون 8 حروف على الأقل، وفيه حرف كبير، حرف صغير، ورقم
+        const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
+        if (!passwordRegex.test(newPassword)) {
+            return res.status(400).json({ 
+                status: 'fail', 
+                message: "Weak password. It must be at least 8 characters long and include uppercase, lowercase letters, and a number, symbol."
+            });
+        }
+
+        // 3. هنجيب الباسورد المتشفر بتاع اليوزر من الداتا بيز
+        const [rows] = await db.query('SELECT password FROM users WHERE id = ?', [userId]);
+        if (rows.length === 0) {
+            return res.status(445).json({ status: 'fail', message: "User not found" });
+        }
+        const userPassword = rows[0].password;
+
+        // 4. مقارنة الباسورد القديم باللي في الداتا بيز (بأمان عن طريق bcrypt)
+        const isMatch = await bcrypt.compare(oldPassword, userPassword);
+        if (!isMatch) {
+            return res.status(400).json({ status: 'fail', message: "Incorrect old password" });
+        }
+
+        // 5. تأمين وتشفير الباسورد الجديد قبل ما نحفظه
+        const salt = await bcrypt.genSalt(10);
+        const hashedNewPassword = await bcrypt.hash(newPassword, salt);
+
+        // 6. التحديث في الداتا بيز
+        await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedNewPassword, userId]);
+
+        // الرد الرايق في حالة النجاح
+        return res.status(200).json({ 
+            status: 'success', 
+            message: "Password changed successfully" 
+        });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ status: 'error', message: "An error occurred" });
+    }
+});
+
+
+
+
 // --- 4. Forgot Password ---
 app.post('/forgot-password', (req, res) => {
     const { Email } = req.body;
