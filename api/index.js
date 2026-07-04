@@ -1031,11 +1031,11 @@ app.put('/change-password', authenticateToken, (req, res) => {
     }
 
     // 3. الـ Regex القوي اللي طلبته (8 حروف، حرف كبير، حرف صغير، رقم)
-    const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/;
+    const passwordRegex = /^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$ %^&*-]).{8,}$/;
     if (!passwordRegex.test(newPassword)) {
         return res.status(400).json({
             status: "failed",
-            message: "New password is too weak! Must be at least 8 characters long, with 1 uppercase, 1 lowercase, and 1 number."
+            message: "New password is too weak! Must be at least 8 characters long, with 1 uppercase, 1 lowercase, and 1 special character."
         });
     }
 
