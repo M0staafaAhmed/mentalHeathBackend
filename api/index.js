@@ -1009,6 +1009,94 @@ app.get('/tests/:testId', (req, res) => {
     });
 });
 
+// --- 4. Change Password (Authenticated Users) ---
+app.put('/change-password', authenticateToken, (req, res) => {
+    // 1. تشيك أمان: نتأكد إن الـ Middleware باصى الـ user والـ id صح
+    if (!req.user || !req.user.id) {
+        return res.status(401).json({
+            status: "failed",
+            message: "Unauthorized: User session missing"
+        });
+    }
+
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.user.id; // التوكن متخزن فيه الـ id من كود اللوجين
+
+    // 2. التحقق من وجود الحقول
+    if (!oldPassword || !newPassword) {
+        return res.status(400).json({
+            status: "failed",
+            message: "Please enter your old and new password"
+        });
+    }
+
+    // 3. الـ Regex القوي اللي طلبته (8 حروف، حرف كبير، حرف صغير، رقم)
+    const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+        return res.status(400).json({
+            status: "failed",
+            message: "New password is too weak! Must be at least 8 characters long, with 1 uppercase, 1 lowercase, and 1 number."
+        });
+    }
+
+    // 4. بنستخدم db.query عشان إنت شغال بـ Pool من Aiven Cloud
+    const sql = "SELECT password FROM users WHERE UserID = ?";
+    db.query(sql, [userId], async (err, results) => {
+        if (err) {
+            return res.status(500).json({
+                status: "failed",
+                message: "Database error: " + err.message
+            });
+        }
+
+        if (!results || results.length === 0) {
+            return res.status(404).json({
+                status: "failed",
+                message: "User not found"
+            });
+        }
+
+        const user = results[0];
+
+        try {
+            // 5. مقارنة الباسورد القديم بالمتشفر بـ bcrypt
+            const isMatch = await bcrypt.compare(oldPassword, user.password);
+            if (!isMatch) {
+                return res.status(401).json({
+                    status: "failed",
+                    message: "Incorrect old password"
+                });
+            }
+
+            // 6. تشفير الباسورد الجديد
+            const salt = await bcrypt.genSalt(10);
+            const hashedNewPassword = await bcrypt.hash(newPassword, salt);
+
+            // 7. تحديث الباسورد في الداتا بيز
+            const updateSql = "UPDATE users SET password = ? WHERE UserID = ?";
+            db.query(updateSql, [hashedNewPassword, userId], (updateErr) => {
+                if (updateErr) {
+                    return res.status(500).json({
+                        status: "failed",
+                        message: "Failed to update password: " + updateErr.message
+                    });
+                }
+
+                // الرد النهائي الناجح متناسق مع المودال
+                return res.status(200).json({
+                    status: "success",
+                    message: "Password changed successfully"
+                });
+            });
+
+        } catch (bcryptErr) {
+            return res.status(500).json({
+                status: "failed",
+                message: "Encryption error: " + bcryptErr.message
+            });
+        }
+    });
+});
 
 
 const PORT = process.env.PORT || 3000;
